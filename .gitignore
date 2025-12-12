@@ -1,0 +1,9 @@
+# Implementation plan (internal document)
+slack-anniversary-bot-implementation-plan.md
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
