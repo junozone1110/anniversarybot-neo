@@ -278,6 +278,14 @@ function buildCelebrationBlocks(employee, eventType, years, gift, profileImageUr
   // 入社日フォーマット
   const hireDateStr = employee.hireDate ? formatDate(employee.hireDate) : '';
 
+  // ヘッダーメッセージ（@here + 太字）
+  let headerText;
+  if (eventType === '誕生日') {
+    headerText = '<!here> *誕生日を迎えた方がいらっしゃいます！ギフトを贈ってお祝いしましょう:present:*';
+  } else {
+    headerText = '<!here> *入社記念日を迎えた方がいます！ギフトを贈ってお祝いしましょう:present:*';
+  }
+
   // メインメッセージ
   let mainText;
   if (eventType === '誕生日') {
@@ -287,6 +295,13 @@ function buildCelebrationBlocks(employee, eventType, years, gift, profileImageUr
   }
 
   const blocks = [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: headerText
+      }
+    },
     {
       type: 'section',
       text: {
