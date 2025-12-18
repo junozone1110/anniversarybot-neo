@@ -2,6 +2,25 @@
  * スプレッドシート読み書き関数
  */
 
+// ==================== キャッシュ ====================
+
+/** @type {Array<Object>|null} 従業員データのキャッシュ */
+let _employeesCache = null;
+
+/** @type {Array<Object>|null} ギフトデータのキャッシュ */
+let _giftsCache = null;
+
+/**
+ * キャッシュをクリア
+ * データ更新後や新しいトリガー実行時に呼び出す
+ */
+function clearCache() {
+  _employeesCache = null;
+  _giftsCache = null;
+}
+
+// ==================== 基本操作 ====================
+
 /**
  * スプレッドシートを取得
  * @returns {GoogleAppsScript.Spreadsheet.Spreadsheet} スプレッドシート
@@ -29,20 +48,29 @@ function getSheet(sheetName) {
  * 従業員データの列インデックス（0始まり）
  */
 const EMPLOYEE_COLUMNS = {
-  ID: 0,           // A: 従業員ID
-  NAME: 1,         // B: 氏名
-  SLACK_ID: 2,     // C: Slack ID
-  HIRE_DATE: 3,    // D: 入社日
-  BIRTHDAY: 4,     // E: 誕生日
-  RETIRED: 5,      // F: 退職フラグ
-  ON_LEAVE: 6      // G: 休職フラグ
+  LAST_NAME: 0,        // A: ビジネスネーム（姓）
+  FIRST_NAME: 1,       // B: ビジネスネーム（名）
+  LAST_NAME_KANA: 2,   // C: ビジネスネーム（姓カナ）
+  FIRST_NAME_KANA: 3,  // D: ビジネスネーム（名カナ）
+  EMAIL: 4,            // E: メールアドレス
+  EMP_CODE: 5,         // F: 社員番号
+  BIRTHDAY: 6,         // G: 生年月日
+  HIRE_DATE: 7,        // H: 入社年月日
+  RETIRED_DATE: 8,     // I: 退職年月日
+  SLACK_ID: 9          // J: Slack ID
 };
 
 /**
  * 全従業員データを取得
+ * @param {boolean} useCache - キャッシュを使用するか（デフォルト: true）
  * @returns {Array<Object>} 従業員オブジェクトの配列
  */
-function getAllEmployees() {
+function getAllEmployees(useCache = true) {
+  // キャッシュが有効で存在する場合はキャッシュを返す
+  if (useCache && _employeesCache) {
+    return _employeesCache;
+  }
+
   const sheet = getSheet(SHEET_NAMES.EMPLOYEES);
   const data = sheet.getDataRange().getValues();
 
@@ -50,28 +78,37 @@ function getAllEmployees() {
   const employees = [];
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if (!row[EMPLOYEE_COLUMNS.ID]) continue; // IDが空の行はスキップ
+    if (!row[EMPLOYEE_COLUMNS.EMP_CODE]) continue; // 社員番号が空の行はスキップ
+
+    const retiredDate = parseDate(row[EMPLOYEE_COLUMNS.RETIRED_DATE]);
 
     employees.push({
-      id: row[EMPLOYEE_COLUMNS.ID],
-      name: row[EMPLOYEE_COLUMNS.NAME],
+      id: String(row[EMPLOYEE_COLUMNS.EMP_CODE]),
+      lastName: row[EMPLOYEE_COLUMNS.LAST_NAME],
+      firstName: row[EMPLOYEE_COLUMNS.FIRST_NAME],
+      lastNameKana: row[EMPLOYEE_COLUMNS.LAST_NAME_KANA],
+      firstNameKana: row[EMPLOYEE_COLUMNS.FIRST_NAME_KANA],
+      name: `${row[EMPLOYEE_COLUMNS.LAST_NAME]}${row[EMPLOYEE_COLUMNS.FIRST_NAME]}`,
+      email: row[EMPLOYEE_COLUMNS.EMAIL],
       slackId: row[EMPLOYEE_COLUMNS.SLACK_ID],
       hireDate: parseDate(row[EMPLOYEE_COLUMNS.HIRE_DATE]),
       birthday: parseDate(row[EMPLOYEE_COLUMNS.BIRTHDAY]),
-      isRetired: row[EMPLOYEE_COLUMNS.RETIRED] === true || row[EMPLOYEE_COLUMNS.RETIRED] === 'TRUE',
-      isOnLeave: row[EMPLOYEE_COLUMNS.ON_LEAVE] === true || row[EMPLOYEE_COLUMNS.ON_LEAVE] === 'TRUE'
+      retiredDate: retiredDate,
+      isRetired: retiredDate !== null
     });
   }
 
+  // キャッシュに保存
+  _employeesCache = employees;
   return employees;
 }
 
 /**
- * アクティブな従業員のみ取得（退職・休職を除く）
+ * アクティブな従業員のみ取得（退職者を除く）
  * @returns {Array<Object>} アクティブな従業員オブジェクトの配列
  */
 function getActiveEmployees() {
-  return getAllEmployees().filter(emp => !emp.isRetired && !emp.isOnLeave);
+  return getAllEmployees().filter(emp => !emp.isRetired);
 }
 
 /**
@@ -82,6 +119,45 @@ function getActiveEmployees() {
 function getEmployeeById(employeeId) {
   const employees = getAllEmployees();
   return employees.find(emp => emp.id === employeeId) || null;
+}
+
+/**
+ * 従業員一覧シートを上書き更新
+ * @param {Array<Object>} employees - 従業員オブジェクトの配列
+ */
+function updateEmployeeSheet(employees) {
+  const sheet = getSheet(SHEET_NAMES.EMPLOYEES);
+  const columnCount = 10; // A〜J列
+
+  // ヘッダー行を保持しつつ、データ部分をクリア
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, columnCount).clearContent();
+  }
+
+  if (employees.length === 0) {
+    logDebug('更新する従業員データがありません');
+    return;
+  }
+
+  // 従業員データを2次元配列に変換
+  const data = employees.map(emp => [
+    emp.lastName,        // A: ビジネスネーム（姓）
+    emp.firstName,       // B: ビジネスネーム（名）
+    emp.lastNameKana,    // C: ビジネスネーム（姓カナ）
+    emp.firstNameKana,   // D: ビジネスネーム（名カナ）
+    emp.email,           // E: メールアドレス
+    emp.id,              // F: 社員番号
+    emp.birthday,        // G: 生年月日
+    emp.hireDate,        // H: 入社年月日
+    emp.retiredDate,     // I: 退職年月日
+    emp.slackId          // J: Slack ID
+  ]);
+
+  // 一括書き込み
+  sheet.getRange(2, 1, data.length, columnCount).setValues(data);
+
+  logDebug(`従業員一覧シートを更新: ${data.length}件`);
 }
 
 // ==================== ギフト一覧 ====================
@@ -97,9 +173,15 @@ const GIFT_COLUMNS = {
 
 /**
  * 全ギフトデータを取得
- * @returns {Array<Object>} ギフトオブジェクトの配列
+ * @param {boolean} useCache - キャッシュを使用するか（デフォルト: true）
+ * @returns {Array<{id: string|number, name: string, url: string}>} ギフトオブジェクトの配列
  */
-function getAllGifts() {
+function getAllGifts(useCache = true) {
+  // キャッシュが有効で存在する場合はキャッシュを返す
+  if (useCache && _giftsCache) {
+    return _giftsCache;
+  }
+
   const sheet = getSheet(SHEET_NAMES.GIFTS);
   const data = sheet.getDataRange().getValues();
 
@@ -115,6 +197,8 @@ function getAllGifts() {
     });
   }
 
+  // キャッシュに保存
+  _giftsCache = gifts;
   return gifts;
 }
 
@@ -162,12 +246,12 @@ function addResponse(response) {
 }
 
 /**
- * 回答記録を更新（OK/NG）
+ * 従業員IDと記念日で回答記録の行を検索
  * @param {string} employeeId - 従業員ID
  * @param {Date} eventDate - 記念日
- * @param {string} approval - OK または NG
+ * @returns {{rowIndex: number, row: Array, sheet: GoogleAppsScript.Spreadsheet.Sheet}|null} 検索結果またはnull
  */
-function updateResponseApproval(employeeId, eventDate, approval) {
+function findResponseRowByEmployeeAndDate(employeeId, eventDate) {
   const sheet = getSheet(SHEET_NAMES.RESPONSES);
   const data = sheet.getDataRange().getValues();
   const eventDateStr = formatDate(eventDate);
@@ -178,14 +262,28 @@ function updateResponseApproval(employeeId, eventDate, approval) {
     const rowEventDate = formatDate(parseDate(row[RESPONSE_COLUMNS.EVENT_DATE]));
 
     if (rowEmployeeId === employeeId && rowEventDate === eventDateStr) {
-      // E列（公開OK/NG）を更新
-      sheet.getRange(i + 1, RESPONSE_COLUMNS.APPROVAL + 1).setValue(approval);
-      logDebug(`回答を更新: ${employeeId}, ${approval}`);
-      return;
+      return { rowIndex: i + 1, row, sheet };
     }
   }
 
-  logDebug(`回答記録が見つかりません: ${employeeId}, ${eventDateStr}`);
+  return null;
+}
+
+/**
+ * 回答記録を更新（OK/NG）
+ * @param {string} employeeId - 従業員ID
+ * @param {Date} eventDate - 記念日
+ * @param {string} approval - OK または NG
+ */
+function updateResponseApproval(employeeId, eventDate, approval) {
+  const result = findResponseRowByEmployeeAndDate(employeeId, eventDate);
+
+  if (result) {
+    result.sheet.getRange(result.rowIndex, RESPONSE_COLUMNS.APPROVAL + 1).setValue(approval);
+    logDebug(`回答を更新: ${employeeId}, ${approval}`);
+  } else {
+    logDebug(`回答記録が見つかりません: ${employeeId}, ${formatDate(eventDate)}`);
+  }
 }
 
 /**
@@ -195,24 +293,14 @@ function updateResponseApproval(employeeId, eventDate, approval) {
  * @param {string} giftId - ギフトID
  */
 function updateResponseGift(employeeId, eventDate, giftId) {
-  const sheet = getSheet(SHEET_NAMES.RESPONSES);
-  const data = sheet.getDataRange().getValues();
-  const eventDateStr = formatDate(eventDate);
+  const result = findResponseRowByEmployeeAndDate(employeeId, eventDate);
 
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    const rowEmployeeId = row[RESPONSE_COLUMNS.EMPLOYEE_ID];
-    const rowEventDate = formatDate(parseDate(row[RESPONSE_COLUMNS.EVENT_DATE]));
-
-    if (rowEmployeeId === employeeId && rowEventDate === eventDateStr) {
-      // F列（選択ギフトID）を更新
-      sheet.getRange(i + 1, RESPONSE_COLUMNS.GIFT_ID + 1).setValue(giftId);
-      logDebug(`ギフト選択を更新: ${employeeId}, ${giftId}`);
-      return;
-    }
+  if (result) {
+    result.sheet.getRange(result.rowIndex, RESPONSE_COLUMNS.GIFT_ID + 1).setValue(giftId);
+    logDebug(`ギフト選択を更新: ${employeeId}, ${giftId}`);
+  } else {
+    logDebug(`回答記録が見つかりません: ${employeeId}, ${formatDate(eventDate)}`);
   }
-
-  logDebug(`回答記録が見つかりません: ${employeeId}, ${eventDateStr}`);
 }
 
 /**
@@ -221,21 +309,11 @@ function updateResponseGift(employeeId, eventDate, giftId) {
  * @param {Date} eventDate - 記念日
  */
 function markAsNotified(employeeId, eventDate) {
-  const sheet = getSheet(SHEET_NAMES.RESPONSES);
-  const data = sheet.getDataRange().getValues();
-  const eventDateStr = formatDate(eventDate);
+  const result = findResponseRowByEmployeeAndDate(employeeId, eventDate);
 
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    const rowEmployeeId = row[RESPONSE_COLUMNS.EMPLOYEE_ID];
-    const rowEventDate = formatDate(parseDate(row[RESPONSE_COLUMNS.EVENT_DATE]));
-
-    if (rowEmployeeId === employeeId && rowEventDate === eventDateStr) {
-      // G列（通知済フラグ）を更新
-      sheet.getRange(i + 1, RESPONSE_COLUMNS.NOTIFIED + 1).setValue(true);
-      logDebug(`通知済に更新: ${employeeId}`);
-      return;
-    }
+  if (result) {
+    result.sheet.getRange(result.rowIndex, RESPONSE_COLUMNS.NOTIFIED + 1).setValue(true);
+    logDebug(`通知済に更新: ${employeeId}`);
   }
 }
 
@@ -256,7 +334,7 @@ function getPendingNotifications() {
     const approval = row[RESPONSE_COLUMNS.APPROVAL];
     const notified = row[RESPONSE_COLUMNS.NOTIFIED];
 
-    if (eventDate === todayStr && approval === 'OK' && !notified) {
+    if (eventDate === todayStr && approval === APPROVAL_VALUES.OK && !notified) {
       pending.push({
         rowIndex: i + 1,
         employeeId: row[RESPONSE_COLUMNS.EMPLOYEE_ID],
@@ -277,28 +355,180 @@ function getPendingNotifications() {
  * @returns {Object|null} 回答記録またはnull
  */
 function getResponseByEmployeeAndDate(employeeId, eventDate) {
-  const sheet = getSheet(SHEET_NAMES.RESPONSES);
+  const result = findResponseRowByEmployeeAndDate(employeeId, eventDate);
+
+  if (!result) {
+    return null;
+  }
+
+  const row = result.row;
+  return {
+    rowIndex: result.rowIndex,
+    timestamp: row[RESPONSE_COLUMNS.TIMESTAMP],
+    employeeId: row[RESPONSE_COLUMNS.EMPLOYEE_ID],
+    eventType: row[RESPONSE_COLUMNS.EVENT_TYPE],
+    eventDate: parseDate(row[RESPONSE_COLUMNS.EVENT_DATE]),
+    approval: row[RESPONSE_COLUMNS.APPROVAL],
+    giftId: row[RESPONSE_COLUMNS.GIFT_ID],
+    notified: row[RESPONSE_COLUMNS.NOTIFIED]
+  };
+}
+
+// ==================== 従業員データ部分更新 ====================
+
+/**
+ * 従業員データを部分更新（差分更新用）
+ * 既存の従業員は更新、新規の従業員は追加
+ * @param {Array<Object>} employees - 更新する従業員オブジェクトの配列
+ * @returns {{updated: number, added: number}} 更新件数と追加件数
+ */
+function upsertEmployees(employees) {
+  if (employees.length === 0) {
+    return { updated: 0, added: 0 };
+  }
+
+  const sheet = getSheet(SHEET_NAMES.EMPLOYEES);
   const data = sheet.getDataRange().getValues();
-  const eventDateStr = formatDate(eventDate);
 
+  // 社員番号をキーとしたインデックスを作成（行番号を保持）
+  const empCodeToRowIndex = {};
   for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    const rowEmployeeId = row[RESPONSE_COLUMNS.EMPLOYEE_ID];
-    const rowEventDate = formatDate(parseDate(row[RESPONSE_COLUMNS.EVENT_DATE]));
-
-    if (rowEmployeeId === employeeId && rowEventDate === eventDateStr) {
-      return {
-        rowIndex: i + 1,
-        timestamp: row[RESPONSE_COLUMNS.TIMESTAMP],
-        employeeId: rowEmployeeId,
-        eventType: row[RESPONSE_COLUMNS.EVENT_TYPE],
-        eventDate: parseDate(row[RESPONSE_COLUMNS.EVENT_DATE]),
-        approval: row[RESPONSE_COLUMNS.APPROVAL],
-        giftId: row[RESPONSE_COLUMNS.GIFT_ID],
-        notified: row[RESPONSE_COLUMNS.NOTIFIED]
-      };
+    const empCode = String(data[i][EMPLOYEE_COLUMNS.EMP_CODE]);
+    if (empCode) {
+      empCodeToRowIndex[empCode] = i + 1; // 1-indexed
     }
   }
 
-  return null;
+  let updatedCount = 0;
+  let addedCount = 0;
+  const newEmployees = [];
+
+  for (const emp of employees) {
+    const empCode = String(emp.id);
+    const rowIndex = empCodeToRowIndex[empCode];
+
+    const rowData = [
+      emp.lastName,        // A: ビジネスネーム（姓）
+      emp.firstName,       // B: ビジネスネーム（名）
+      emp.lastNameKana,    // C: ビジネスネーム（姓カナ）
+      emp.firstNameKana,   // D: ビジネスネーム（名カナ）
+      emp.email,           // E: メールアドレス
+      emp.id,              // F: 社員番号
+      emp.birthday,        // G: 生年月日
+      emp.hireDate,        // H: 入社年月日
+      emp.retiredDate,     // I: 退職年月日
+      emp.slackId || ''    // J: Slack ID（既存を保持する場合は空で上書きしない）
+    ];
+
+    if (rowIndex) {
+      // 既存の従業員を更新（Slack IDは既存値を保持）
+      const existingSlackId = data[rowIndex - 1][EMPLOYEE_COLUMNS.SLACK_ID];
+      if (existingSlackId && !emp.slackId) {
+        rowData[EMPLOYEE_COLUMNS.SLACK_ID] = existingSlackId;
+      }
+      sheet.getRange(rowIndex, 1, 1, 10).setValues([rowData]);
+      updatedCount++;
+    } else {
+      // 新規従業員として追加リストに追加
+      newEmployees.push(rowData);
+      addedCount++;
+    }
+  }
+
+  // 新規従業員を一括追加
+  if (newEmployees.length > 0) {
+    const lastRow = sheet.getLastRow();
+    sheet.getRange(lastRow + 1, 1, newEmployees.length, 10).setValues(newEmployees);
+  }
+
+  logDebug(`従業員データ部分更新: 更新${updatedCount}件, 追加${addedCount}件`);
+  return { updated: updatedCount, added: addedCount };
 }
+
+// ==================== Slack ID 更新 ====================
+
+/**
+ * 全従業員のSlack IDをメールアドレスから取得して更新
+ * 手動実行用の関数
+ * @param {boolean} activeOnly - 在籍中のみ対象とするか（デフォルト: true）
+ */
+function updateAllSlackIds(activeOnly = true) {
+  console.log('=== Slack ID一括更新処理を開始 ===');
+  console.log(`対象: ${activeOnly ? '在籍中のみ' : '全員'}`);
+
+  const sheet = getSheet(SHEET_NAMES.EMPLOYEES);
+  const data = sheet.getDataRange().getValues();
+
+  let updatedCount = 0;
+  let notFoundCount = 0;
+  let alreadySetCount = 0;
+  let noEmailCount = 0;
+  let retiredCount = 0;
+
+  // ヘッダー行をスキップ
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const empCode = row[EMPLOYEE_COLUMNS.EMP_CODE];
+    if (!empCode) continue;
+
+    const email = row[EMPLOYEE_COLUMNS.EMAIL];
+    const currentSlackId = row[EMPLOYEE_COLUMNS.SLACK_ID];
+    const retiredDate = row[EMPLOYEE_COLUMNS.RETIRED_DATE];
+    const name = `${row[EMPLOYEE_COLUMNS.LAST_NAME]}${row[EMPLOYEE_COLUMNS.FIRST_NAME]}`;
+
+    // 退職者はスキップ（activeOnlyがtrueの場合）
+    if (activeOnly && retiredDate) {
+      retiredCount++;
+      continue;
+    }
+
+    // 既にSlack IDが設定されている場合はスキップ
+    if (currentSlackId) {
+      alreadySetCount++;
+      continue;
+    }
+
+    // メールアドレスがない場合はスキップ
+    if (!email) {
+      console.log(`[スキップ] ${name}: メールアドレスなし`);
+      noEmailCount++;
+      continue;
+    }
+
+    // Slack APIでユーザー検索
+    const user = lookupUserByEmail(email);
+
+    if (user) {
+      // Slack IDを更新（J列 = 10列目）
+      sheet.getRange(i + 1, EMPLOYEE_COLUMNS.SLACK_ID + 1).setValue(user.id);
+      console.log(`[更新] ${name}: ${user.id}`);
+      updatedCount++;
+    } else {
+      console.log(`[未発見] ${name}: ${email}`);
+      notFoundCount++;
+    }
+
+    // レート制限対策
+    Utilities.sleep(API_CONFIG.RATE_LIMIT_DELAY_MS);
+  }
+
+  // キャッシュをクリア
+  clearCache();
+
+  console.log('\n=== 処理完了 ===');
+  console.log(`更新: ${updatedCount}件`);
+  console.log(`既存: ${alreadySetCount}件`);
+  console.log(`未発見: ${notFoundCount}件`);
+  console.log(`メールなし: ${noEmailCount}件`);
+  if (activeOnly) {
+    console.log(`退職者スキップ: ${retiredCount}件`);
+  }
+}
+
+/**
+ * 在籍中従業員のSlack IDのみ更新（退職者を除く）
+ */
+function updateActiveEmployeeSlackIds() {
+  updateAllSlackIds(true);
+}
+

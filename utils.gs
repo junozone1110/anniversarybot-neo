@@ -131,17 +131,62 @@ function parseDate(value) {
 }
 
 /**
- * ログ出力（デバッグ用）
+ * ログ出力の内部関数
+ * @param {number} level - ログレベル
+ * @param {string} levelName - レベル名
+ * @param {string} message - メッセージ
+ * @param {any} data - 追加データ（任意）
+ */
+function _log(level, levelName, message, data = null) {
+  if (level < CURRENT_LOG_LEVEL) return;
+
+  const timestamp = formatDateTime(new Date());
+  const prefix = `[${timestamp}] ${levelName}:`;
+
+  if (data) {
+    if (level >= LOG_LEVELS.ERROR) {
+      console.error(prefix, message, data);
+    } else if (level >= LOG_LEVELS.WARN) {
+      console.warn(prefix, message, data);
+    } else {
+      console.log(prefix, message, JSON.stringify(data, null, 2));
+    }
+  } else {
+    if (level >= LOG_LEVELS.ERROR) {
+      console.error(prefix, message);
+    } else if (level >= LOG_LEVELS.WARN) {
+      console.warn(prefix, message);
+    } else {
+      console.log(prefix, message);
+    }
+  }
+}
+
+/**
+ * デバッグログ出力
  * @param {string} message - メッセージ
  * @param {any} data - 追加データ（任意）
  */
 function logDebug(message, data = null) {
-  const timestamp = formatDateTime(new Date());
-  if (data) {
-    console.log(`[${timestamp}] ${message}`, JSON.stringify(data, null, 2));
-  } else {
-    console.log(`[${timestamp}] ${message}`);
-  }
+  _log(LOG_LEVELS.DEBUG, 'DEBUG', message, data);
+}
+
+/**
+ * 情報ログ出力
+ * @param {string} message - メッセージ
+ * @param {any} data - 追加データ（任意）
+ */
+function logInfo(message, data = null) {
+  _log(LOG_LEVELS.INFO, 'INFO', message, data);
+}
+
+/**
+ * 警告ログ出力
+ * @param {string} message - メッセージ
+ * @param {any} data - 追加データ（任意）
+ */
+function logWarn(message, data = null) {
+  _log(LOG_LEVELS.WARN, 'WARN', message, data);
 }
 
 /**
@@ -150,6 +195,143 @@ function logDebug(message, data = null) {
  * @param {Error} error - エラーオブジェクト
  */
 function logError(message, error) {
-  const timestamp = formatDateTime(new Date());
-  console.error(`[${timestamp}] ERROR: ${message}`, error.message, error.stack);
+  _log(LOG_LEVELS.ERROR, 'ERROR', message, { message: error.message, stack: error.stack });
+}
+
+/**
+ * 安全なJSONパース
+ * パースに失敗した場合はエラーログを出力してフォールバック値を返す
+ * @param {string} text - パースするJSON文字列
+ * @param {any} fallback - パース失敗時の戻り値（デフォルト: null）
+ * @returns {any} パース結果またはフォールバック値
+ */
+function safeJsonParse(text, fallback = null) {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    logError('JSON parse error', e);
+    return fallback;
+  }
+}
+
+// ==================== 入力バリデーション ====================
+
+/**
+ * 従業員IDのバリデーション
+ * @param {string|number} id - 従業員ID
+ * @returns {string|null} 有効なIDまたはnull
+ */
+function validateEmployeeId(id) {
+  if (id === null || id === undefined || id === '') {
+    return null;
+  }
+  const strId = String(id).trim();
+  // 空文字チェック
+  if (strId.length === 0) {
+    return null;
+  }
+  // 長さ制限（1〜20文字）
+  if (strId.length > 20) {
+    return null;
+  }
+  // 許可文字（英数字、ハイフン、アンダースコア）
+  if (!/^[a-zA-Z0-9_-]+$/.test(strId)) {
+    return null;
+  }
+  return strId;
+}
+
+/**
+ * メールアドレスのバリデーション
+ * @param {string} email - メールアドレス
+ * @returns {string|null} 有効なメールアドレスまたはnull
+ */
+function validateEmail(email) {
+  if (!email || typeof email !== 'string') {
+    return null;
+  }
+  const trimmed = email.trim().toLowerCase();
+  // 簡易的なメールアドレス形式チェック
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(trimmed)) {
+    return null;
+  }
+  // 長さ制限
+  if (trimmed.length > 254) {
+    return null;
+  }
+  return trimmed;
+}
+
+/**
+ * Slack IDのバリデーション
+ * @param {string} slackId - Slack ID
+ * @returns {string|null} 有効なSlack IDまたはnull
+ */
+function validateSlackId(slackId) {
+  if (!slackId || typeof slackId !== 'string') {
+    return null;
+  }
+  const trimmed = slackId.trim();
+  // Slack User IDは通常 U + 10文字の英数字
+  if (!/^[UW][A-Z0-9]{8,12}$/.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+/**
+ * 日付文字列のバリデーション（YYYY/MM/DD形式）
+ * @param {string} dateStr - 日付文字列
+ * @returns {string|null} 有効な日付文字列またはnull
+ */
+function validateDateString(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') {
+    return null;
+  }
+  const trimmed = dateStr.trim();
+  // YYYY/MM/DD形式チェック
+  if (!/^\d{4}\/\d{2}\/\d{2}$/.test(trimmed)) {
+    return null;
+  }
+  // 実際に有効な日付かチェック
+  const parsed = parseDate(trimmed);
+  if (!parsed) {
+    return null;
+  }
+  return trimmed;
+}
+
+/**
+ * ギフトIDのバリデーション
+ * @param {string|number} giftId - ギフトID
+ * @returns {string|null} 有効なギフトIDまたはnull
+ */
+function validateGiftId(giftId) {
+  if (giftId === null || giftId === undefined || giftId === '') {
+    return null;
+  }
+  const strId = String(giftId).trim();
+  // 長さ制限
+  if (strId.length === 0 || strId.length > 50) {
+    return null;
+  }
+  return strId;
+}
+
+/**
+ * 文字列のサニタイズ（HTMLエスケープ）
+ * @param {string} str - 入力文字列
+ * @returns {string} サニタイズされた文字列
+ */
+function sanitizeString(str) {
+  if (!str || typeof str !== 'string') {
+    return '';
+  }
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
 }

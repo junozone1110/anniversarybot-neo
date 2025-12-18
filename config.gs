@@ -11,7 +11,7 @@
  */
 
 // スプレッドシートID（要変更）
-const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID';
+const SPREADSHEET_ID = '1g1Gf1OcsP84JNFDprCmCQTmR4FVkAFzCF7C48zPzTXg';
 
 // シート名
 const SHEET_NAMES = {
@@ -25,6 +25,14 @@ const CELEBRATION_CHANNEL_ID = 'YOUR_CHANNEL_ID';
 
 // 入社周年の対象年数
 const ANNIVERSARY_YEARS = [1, 3, 5, 10];
+
+// ==================== SmartHR 設定 ====================
+
+// SmartHRのサブドメイン（例: 'your-company' → https://your-company.smarthr.jp）
+const SMARTHR_SUBDOMAIN = '7e540dfa42a4f78136f1bcaf';
+
+// SmartHRでSlack IDを保存しているカスタムフィールド名
+const SMARTHR_SLACK_ID_FIELD_NAME = 'slack_id';
 
 /**
  * Slack Bot Tokenを取得
@@ -56,4 +64,16 @@ function getSlackSigningSecret() {
  */
 function getAdminSlackId() {
   return PropertiesService.getScriptProperties().getProperty('ADMIN_SLACK_ID') || null;
+}
+
+/**
+ * SmartHR APIアクセストークンを取得
+ * @returns {string} アクセストークン
+ */
+function getSmartHrAccessToken() {
+  const token = PropertiesService.getScriptProperties().getProperty('SMARTHR_ACCESS_TOKEN');
+  if (!token) {
+    throw new Error('SMARTHR_ACCESS_TOKEN が設定されていません。スクリプトプロパティに設定してください。');
+  }
+  return token;
 }

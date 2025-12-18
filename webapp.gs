@@ -18,7 +18,11 @@ function doPost(e) {
     }
 
     // ペイロードをパース
-    const payload = JSON.parse(e.parameter.payload);
+    const payload = safeJsonParse(e.parameter.payload);
+    if (!payload) {
+      logError('ペイロードのパースに失敗', new Error('Invalid JSON payload'));
+      return ContentService.createTextOutput('Invalid payload').setMimeType(ContentService.MimeType.TEXT);
+    }
 
     // 重複実行防止
     const actions = payload.actions;
@@ -71,14 +75,19 @@ function verifySlackRequest(e) {
     const slackSignature = e.parameter['X-Slack-Signature'] ||
                            (e.headers && e.headers['X-Slack-Signature']);
 
-    // GASの制約でheadersが取得できない場合がある
+    // GASの制約でheadersが取得できない場合
+    // 注意: GAS Web Appではヘッダーが取得できないことが多いため、
+    // この場合は検証をスキップする（GASの制約による妥協）
     if (!timestamp || !slackSignature) {
-      return true;
+      logDebug('署名検証スキップ: ヘッダー取得不可（GAS Web App制約）');
+      // ペイロードの基本的な検証で代替
+      return validatePayloadStructure(e);
     }
 
-    // リプレイ攻撃対策：5分以上前のリクエストは拒否
+    // リプレイ攻撃対策：一定時間以上前のリクエストは拒否
     const now = Math.floor(Date.now() / 1000);
-    if (Math.abs(now - parseInt(timestamp)) > 60 * 5) {
+    if (Math.abs(now - parseInt(timestamp)) > SECURITY.REPLAY_WINDOW_SECONDS) {
+      logDebug(`リプレイ攻撃検出: timestamp=${timestamp}, now=${now}`);
       return false;
     }
 
@@ -87,11 +96,91 @@ function verifySlackRequest(e) {
     const signature = Utilities.computeHmacSha256Signature(sigBasestring, signingSecret);
     const signatureHex = 'v0=' + signature.map(b => ('0' + (b & 0xFF).toString(16)).slice(-2)).join('');
 
-    return signatureHex === slackSignature;
+    const isValid = signatureHex === slackSignature;
+    if (!isValid) {
+      logDebug('署名不一致');
+    }
+    return isValid;
   } catch (error) {
     logError('署名検証でエラー', error);
-    return true;
+    return false; // エラー時は安全側に倒す
   }
+}
+
+/**
+ * ペイロード構造の基本検証（署名検証の代替）
+ * @param {Object} e - イベントオブジェクト
+ * @returns {boolean} 有効な構造ならtrue
+ */
+function validatePayloadStructure(e) {
+  try {
+    if (!e.parameter || !e.parameter.payload) {
+      return false;
+    }
+    const payload = safeJsonParse(e.parameter.payload);
+    if (!payload) {
+      return false;
+    }
+    // Slack Interactivityの必須フィールドを確認
+    if (!payload.type || !payload.user || !payload.response_url) {
+      return false;
+    }
+    // typeが期待値かチェック
+    const validTypes = ['block_actions', 'interactive_message', 'view_submission'];
+    if (!validTypes.includes(payload.type)) {
+      logDebug(`不正なpayload type: ${payload.type}`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    logError('ペイロード構造検証でエラー', error);
+    return false;
+  }
+}
+
+/**
+ * アクションIDサフィックスをパースしてemployeeIdとeventDateStrを抽出
+ * @param {string} suffix - アクションIDからプレフィックスを除いた部分
+ * @returns {{employeeId: string, eventDateStr: string}|null} パース結果またはnull
+ */
+function parseActionIdSuffix(suffix) {
+  const lastUnderscoreIndex = suffix.lastIndexOf('_');
+  if (lastUnderscoreIndex === -1) return null;
+
+  return {
+    employeeId: suffix.slice(0, lastUnderscoreIndex),
+    eventDateStr: suffix.slice(lastUnderscoreIndex + 1)
+  };
+}
+
+/**
+ * アクションIDをパースして構造化データを返す
+ * @param {string} actionId - アクションID
+ * @returns {{type: string, employeeId: string, eventDateStr: string}|null} パース結果またはnull
+ */
+function parseActionId(actionId) {
+  // プレフィックスとタイプのマッピング
+  const prefixMapping = [
+    { prefix: ACTION_ID_PREFIX.APPROVAL_OK, type: 'approval_ok' },
+    { prefix: ACTION_ID_PREFIX.APPROVAL_NG, type: 'approval_ng' },
+    { prefix: ACTION_ID_PREFIX.GIFT_SELECT, type: 'gift_select' }
+  ];
+
+  for (const { prefix, type } of prefixMapping) {
+    if (actionId.startsWith(prefix)) {
+      const suffix = actionId.slice(prefix.length);
+      const parsed = parseActionIdSuffix(suffix);
+      if (!parsed) return null;
+
+      return {
+        type: type,
+        employeeId: parsed.employeeId,
+        eventDateStr: parsed.eventDateStr
+      };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -108,27 +197,49 @@ function handleInteractiveAction(payload) {
   const actionId = action.action_id;
   const responseUrl = payload.response_url;
 
-  // アクションIDからタイプと情報を抽出
-  // フォーマット: {type}_{employeeId}_{eventDate}
-  const parts = actionId.split('_');
+  logDebug(`アクション受信: ${actionId}`);
 
-  if (actionId.startsWith('approval_ok_') || actionId.startsWith('approval_ng_')) {
+  // アクションIDをパース
+  const parsed = parseActionId(actionId);
+  if (!parsed) {
+    logDebug(`不明なアクションID: ${actionId}`);
+    return;
+  }
+
+  // 従業員IDのバリデーション
+  const validatedEmployeeId = validateEmployeeId(parsed.employeeId);
+  if (!validatedEmployeeId) {
+    logError(`従業員IDバリデーションエラー: ${parsed.employeeId}`, new Error('Invalid employee ID'));
+    return;
+  }
+
+  const eventDate = parseDate(parsed.eventDateStr);
+  if (!eventDate) {
+    logError(`日付パースエラー: ${parsed.eventDateStr}`, new Error('Invalid date format'));
+    return;
+  }
+
+  if (parsed.type === 'approval_ok' || parsed.type === 'approval_ng') {
     // OK/NGボタンの処理
-    const approval = actionId.startsWith('approval_ok_') ? 'OK' : 'NG';
-    const employeeId = parts[2];
-    const eventDateStr = parts[3];
-    const eventDate = parseDate(eventDateStr);
+    const approval = parsed.type === 'approval_ok' ? APPROVAL_VALUES.OK : APPROVAL_VALUES.NG;
+    logDebug(`承認処理: ${validatedEmployeeId}, ${approval}`);
+    handleApprovalAction(validatedEmployeeId, eventDate, approval, responseUrl);
 
-    handleApprovalAction(employeeId, eventDate, approval, responseUrl);
-
-  } else if (actionId.startsWith('gift_select_')) {
+  } else if (parsed.type === 'gift_select') {
     // ギフト選択の処理
-    const employeeId = parts[2];
-    const eventDateStr = parts[3];
-    const eventDate = parseDate(eventDateStr);
-    const giftId = action.selected_option.value;
-
-    handleGiftSelectAction(employeeId, eventDate, giftId, responseUrl);
+    const giftId = action.selected_option?.value;
+    if (!giftId) {
+      logError('ギフトIDが取得できません', new Error('No gift ID'));
+      return;
+    }
+    // ギフトIDのバリデーション
+    const validatedGiftId = validateGiftId(giftId);
+    if (!validatedGiftId) {
+      logError(`ギフトIDバリデーションエラー: ${giftId}`, new Error('Invalid gift ID'));
+      return;
+    }
+    logDebug(`ギフト選択処理: ${validatedEmployeeId}, ギフトID: ${validatedGiftId}`);
+    handleGiftSelectAction(validatedEmployeeId, eventDate, validatedGiftId, responseUrl);
   }
 }
 
@@ -144,7 +255,7 @@ function handleApprovalAction(employeeId, eventDate, approval, responseUrl) {
     // スプレッドシートを更新
     updateResponseApproval(employeeId, eventDate, approval);
 
-    if (approval === 'OK') {
+    if (approval === APPROVAL_VALUES.OK) {
       // OKの場合はギフト選択画面を表示
       const gifts = getAllGifts();
       const blocks = buildGiftSelectBlocks(employeeId, eventDate, gifts);
@@ -180,8 +291,8 @@ function handleGiftSelectAction(employeeId, eventDate, giftId, responseUrl) {
     const response = getResponseByEmployeeAndDate(employeeId, eventDate);
 
     // OKが選択されている場合のみ確認メッセージを更新
-    if (response && response.approval === 'OK') {
-      const blocks = buildResponseConfirmationBlocks('OK', giftName);
+    if (response && response.approval === APPROVAL_VALUES.OK) {
+      const blocks = buildResponseConfirmationBlocks(APPROVAL_VALUES.OK, giftName);
       sendResponseUrlMessage(responseUrl, blocks);
     }
   } catch (error) {

@@ -38,14 +38,14 @@ function sendPreDayNotifications() {
 function checkAndNotifyEmployee(employee, targetDate, gifts) {
   // 誕生日チェック
   if (isBirthday(employee.birthday, targetDate)) {
-    sendPreDayDm(employee, '誕生日', null, targetDate, gifts);
+    sendPreDayDm(employee, EVENT_TYPES.BIRTHDAY, null, targetDate, gifts);
     return true;
   }
 
   // 入社周年チェック
   const anniversaryYears = getAnniversaryYears(employee.hireDate, targetDate);
   if (anniversaryYears) {
-    sendPreDayDm(employee, '入社周年', anniversaryYears, targetDate, gifts);
+    sendPreDayDm(employee, EVENT_TYPES.ANNIVERSARY, anniversaryYears, targetDate, gifts);
     return true;
   }
 
@@ -134,23 +134,18 @@ function postCelebrationMessage(notification) {
 
     // 勤続年数を計算（入社周年の場合）
     let years = null;
-    if (notification.eventType === '入社周年') {
+    if (notification.eventType === EVENT_TYPES.ANNIVERSARY) {
       years = calculateYearsOfService(employee.hireDate, notification.eventDate);
     }
 
-    // プロフィール画像を取得
-    let profileImageUrl;
-    try {
-      profileImageUrl = getUserProfileImage(employee.slackId);
-    } catch (e) {
-      profileImageUrl = 'https://a.slack-edge.com/80588/img/slackbot_72.png';
-    }
+    // プロフィール画像を取得（エラー時は自動的にデフォルト画像が返る）
+    const profileImageUrl = getUserProfileImage(employee.slackId);
 
     // Block Kit メッセージを構築
     const blocks = buildCelebrationBlocks(employee, notification.eventType, years, gift, profileImageUrl);
 
     // チャンネルに投稿
-    const fallbackText = notification.eventType === '誕生日'
+    const fallbackText = notification.eventType === EVENT_TYPES.BIRTHDAY
       ? `🎂 ${employee.name}さん、お誕生日おめでとうございます！`
       : `🎉 ${employee.name}さん、勤続${years}年おめでとうございます！`;
 
@@ -177,6 +172,13 @@ function setupTriggers() {
     ScriptApp.deleteTrigger(trigger);
   }
 
+  // SmartHR同期 毎日02:00のトリガー
+  ScriptApp.newTrigger('syncEmployeesFromSmartHr')
+    .timeBased()
+    .atHour(2)
+    .everyDays(1)
+    .create();
+
   // 前日12:00のトリガー
   ScriptApp.newTrigger('sendPreDayNotifications')
     .timeBased()
@@ -191,7 +193,7 @@ function setupTriggers() {
     .everyDays(1)
     .create();
 
-  logDebug('トリガーを設定しました');
+  logDebug('トリガーを設定しました（SmartHR同期: 02:00, 前日DM: 12:00, 当日投稿: 13:00）');
 }
 
 /**

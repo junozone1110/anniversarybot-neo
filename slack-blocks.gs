@@ -1,147 +1,6 @@
 /**
- * Slack API関連関数
+ * Slack Block Kit メッセージ構築関数
  */
-
-/**
- * Slack APIを呼び出す共通関数
- * @param {string} endpoint - APIエンドポイント（例: 'chat.postMessage'）
- * @param {Object} payload - リクエストボディ
- * @returns {Object} APIレスポンス
- */
-function callSlackApi(endpoint, payload) {
-  const token = getSlackBotToken();
-  const url = `https://slack.com/api/${endpoint}`;
-
-  const options = {
-    method: 'post',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json; charset=utf-8'
-    },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-
-  const response = UrlFetchApp.fetch(url, options);
-  const result = JSON.parse(response.getContentText());
-
-  if (!result.ok) {
-    logError(`Slack API Error (${endpoint})`, new Error(result.error));
-    throw new Error(`Slack API Error: ${result.error}`);
-  }
-
-  return result;
-}
-
-/**
- * DMチャンネルを開く
- * @param {string} userId - SlackユーザーID
- * @returns {string} DMチャンネルID
- */
-function openDmChannel(userId) {
-  const result = callSlackApi('conversations.open', {
-    users: userId
-  });
-  return result.channel.id;
-}
-
-/**
- * メッセージを送信
- * @param {string} channel - チャンネルIDまたはDMチャンネルID
- * @param {string} text - フォールバックテキスト
- * @param {Array} blocks - Block Kit ブロック配列
- * @returns {Object} APIレスポンス
- */
-function postMessage(channel, text, blocks = null) {
-  const payload = {
-    channel: channel,
-    text: text
-  };
-
-  if (blocks) {
-    payload.blocks = blocks;
-  }
-
-  return callSlackApi('chat.postMessage', payload);
-}
-
-/**
- * DMを送信
- * @param {string} userId - SlackユーザーID
- * @param {string} text - フォールバックテキスト
- * @param {Array} blocks - Block Kit ブロック配列
- * @returns {Object} APIレスポンス
- */
-function sendDm(userId, text, blocks = null) {
-  const channelId = openDmChannel(userId);
-  return postMessage(channelId, text, blocks);
-}
-
-/**
- * ユーザー情報を取得
- * @param {string} userId - SlackユーザーID
- * @returns {Object} ユーザー情報
- */
-function getUserInfo(userId) {
-  const token = getSlackBotToken();
-  const url = `https://slack.com/api/users.info?user=${userId}`;
-
-  const options = {
-    method: 'get',
-    headers: {
-      'Authorization': `Bearer ${token}`
-    },
-    muteHttpExceptions: true
-  };
-
-  const response = UrlFetchApp.fetch(url, options);
-  const result = JSON.parse(response.getContentText());
-
-  if (!result.ok) {
-    logError(`Slack API Error (users.info)`, new Error(result.error));
-    throw new Error(`Slack API Error: ${result.error}`);
-  }
-
-  return result.user;
-}
-
-/**
- * ユーザーのプロフィール画像URLを取得
- * @param {string} userId - SlackユーザーID
- * @returns {string} プロフィール画像URL（512x512）
- */
-function getUserProfileImage(userId) {
-  const user = getUserInfo(userId);
-  // 利用可能な最大サイズの画像を返す
-  return user.profile.image_512 ||
-         user.profile.image_192 ||
-         user.profile.image_72 ||
-         user.profile.image_48;
-}
-
-/**
- * メッセージを更新（Interactivity応答後など）
- * @param {string} channel - チャンネルID
- * @param {string} ts - メッセージのタイムスタンプ
- * @param {string} text - 新しいテキスト
- * @param {Array} blocks - 新しいBlock Kit ブロック配列
- * @returns {Object} APIレスポンス
- */
-function updateMessage(channel, ts, text, blocks = null) {
-  const payload = {
-    channel: channel,
-    ts: ts,
-    text: text
-  };
-
-  if (blocks) {
-    payload.blocks = blocks;
-  }
-
-  return callSlackApi('chat.update', payload);
-}
-
-// ==================== Block Kit メッセージ構築 ====================
 
 /**
  * 前日DM用のBlock Kitメッセージを構築（OK/NGのみ）
@@ -155,10 +14,10 @@ function updateMessage(channel, ts, text, blocks = null) {
 function buildPreDayDmBlocks(employee, eventType, years, eventDate, gifts) {
   // 記念日の説明文
   let eventDescription;
-  if (eventType === '誕生日') {
-    eventDescription = `明日はあなたの *お誕生日* です！`;
+  if (eventType === EVENT_TYPES.BIRTHDAY) {
+    eventDescription = MESSAGE_TEMPLATES.BIRTHDAY_PRE_DAY;
   } else {
-    eventDescription = `明日で *勤続${years}年* を迎えます！`;
+    eventDescription = MESSAGE_TEMPLATES.ANNIVERSARY_PRE_DAY.replace('{years}', years);
   }
 
   // アクションIDに含める情報（employeeId_eventDate）
@@ -197,8 +56,8 @@ function buildPreDayDmBlocks(employee, eventType, years, eventDate, gifts) {
             emoji: true
           },
           style: 'primary',
-          action_id: `approval_ok_${actionIdSuffix}`,
-          value: 'OK'
+          action_id: `${ACTION_ID_PREFIX.APPROVAL_OK}${actionIdSuffix}`,
+          value: APPROVAL_VALUES.OK
         },
         {
           type: 'button',
@@ -208,8 +67,8 @@ function buildPreDayDmBlocks(employee, eventType, years, eventDate, gifts) {
             emoji: true
           },
           style: 'danger',
-          action_id: `approval_ng_${actionIdSuffix}`,
-          value: 'NG'
+          action_id: `${ACTION_ID_PREFIX.APPROVAL_NG}${actionIdSuffix}`,
+          value: APPROVAL_VALUES.NG
         }
       ]
     }
@@ -255,7 +114,7 @@ function buildGiftSelectBlocks(employeeId, eventDate, gifts) {
             type: 'plain_text',
             text: 'ギフトを選択'
           },
-          action_id: `gift_select_${actionIdSuffix}`,
+          action_id: `${ACTION_ID_PREFIX.GIFT_SELECT}${actionIdSuffix}`,
           options: giftOptions
         }
       ]
@@ -280,15 +139,15 @@ function buildCelebrationBlocks(employee, eventType, years, gift, profileImageUr
 
   // ヘッダーメッセージ（@here + 太字）
   let headerText;
-  if (eventType === '誕生日') {
-    headerText = '<!here> *誕生日を迎えた方がいらっしゃいます！ギフトを贈ってお祝いしましょう:present:*';
+  if (eventType === EVENT_TYPES.BIRTHDAY) {
+    headerText = MESSAGE_TEMPLATES.BIRTHDAY_HEADER;
   } else {
-    headerText = '<!here> *入社記念日を迎えた方がいます！ギフトを贈ってお祝いしましょう:present:*';
+    headerText = MESSAGE_TEMPLATES.ANNIVERSARY_HEADER;
   }
 
   // メインメッセージ
   let mainText;
-  if (eventType === '誕生日') {
+  if (eventType === EVENT_TYPES.BIRTHDAY) {
     mainText = `*${employee.name}* <@${employee.slackId}> さん、お誕生日おめでとうございます🎂`;
   } else {
     mainText = `*${employee.name}* <@${employee.slackId}> さん、勤続${years}年（${hireDateStr}入社）おめでとうございます🎉`;
@@ -357,7 +216,7 @@ function buildCelebrationBlocks(employee, eventType, years, gift, profileImageUr
  */
 function buildResponseConfirmationBlocks(approval, giftName = null) {
   let text;
-  if (approval === 'OK') {
+  if (approval === APPROVAL_VALUES.OK) {
     text = '✅ *回答を受け付けました！*\n\n明日、チャンネルでお祝いメッセージを投稿します。';
     if (giftName) {
       text += `\n選択されたギフト：*${giftName}*`;
@@ -375,22 +234,4 @@ function buildResponseConfirmationBlocks(approval, giftName = null) {
       }
     }
   ];
-}
-
-/**
- * 管理者にエラー通知を送信
- * @param {string} errorMessage - エラーメッセージ
- */
-function notifyAdminError(errorMessage) {
-  const adminId = getAdminSlackId();
-  if (!adminId) {
-    logDebug('管理者Slack IDが設定されていないため、エラー通知をスキップ');
-    return;
-  }
-
-  try {
-    sendDm(adminId, `⚠️ Anniversary Bot エラー通知\n\n${errorMessage}`);
-  } catch (e) {
-    logError('管理者通知の送信に失敗', e);
-  }
 }
