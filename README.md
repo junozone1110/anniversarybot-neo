@@ -129,9 +129,46 @@ GASエディタで `setupTriggers` 関数を実行:
 
 ### テスト関数
 
+**接続テスト:**
 - `testSmartHrConnection`: SmartHR API接続テスト
 - `testSlackIdLookup`: Slack IDルックアップテスト
 - `testAllConnections`: 全接続テスト
+
+**DM・通知テスト:**
+- `testShowFirstEmployee`: 1行目の従業員情報を表示
+- `testSendPreDayDmBirthday`: 1行目の従業員に誕生日DMを送信
+- `testSendPreDayDmAnniversary`: 1行目の従業員に入社周年DMを送信
+- `testSendCelebrationMessage`: お祝いメッセージをチャンネルに投稿
+
+## テスト手順
+
+### 1. 事前準備
+- スプレッドシートの「従業員一覧」1行目にテストデータを登録
+- テスト従業員のSlack IDを設定（`updateActiveEmployeeSlackIds`で自動取得可能）
+- `CELEBRATION_CHANNEL_ID`を設定し、Botをチャンネルに招待
+
+### 2. 従業員情報の確認
+```
+testShowFirstEmployee
+```
+テストデータ（氏名、Slack ID、誕生日等）が正しく登録されているか確認。
+
+### 3. 前日DMテスト
+```
+testSendPreDayDmBirthday      // 誕生日として送信
+testSendPreDayDmAnniversary   // 入社3年として送信
+```
+- テスト従業員にDMが届く
+- OK/NGボタンを押してインタラクション動作を確認
+- OKを押すとギフト選択画面が表示される
+- 「回答記録」シートに記録が追加される
+
+### 4. お祝いメッセージ投稿テスト
+```
+testSendCelebrationMessage
+```
+- 設定したチャンネルにお祝いメッセージが投稿される
+- プロフィール画像、ギフト情報が表示される
 
 ## ログレベル設定
 
