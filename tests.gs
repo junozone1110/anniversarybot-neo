@@ -134,6 +134,185 @@ function testSlackIdLookup() {
   console.log('\n=== テスト完了 ===');
 }
 
+// ==================== DM・通知テスト ====================
+
+/**
+ * 1行目の従業員に前日DMを送信するテスト（誕生日として）
+ * GASエディタから手動実行
+ */
+function testSendPreDayDmBirthday() {
+  console.log('=== 前日DM送信テスト（誕生日） ===');
+
+  try {
+    const employees = getAllEmployees(false);
+    if (employees.length === 0) {
+      console.error('従業員データがありません');
+      return;
+    }
+
+    const testEmployee = employees[0];
+    console.log(`テスト対象: ${testEmployee.name} (${testEmployee.id})`);
+    console.log(`Slack ID: ${testEmployee.slackId || '(未設定)'}`);
+
+    if (!testEmployee.slackId) {
+      console.error('Slack IDが設定されていません。先にSlack IDを設定してください。');
+      return;
+    }
+
+    const gifts = getAllGifts(false);
+    console.log(`ギフト数: ${gifts.length}件`);
+
+    // 明日の日付を記念日として使用
+    const testEventDate = getTomorrow();
+    console.log(`テスト記念日: ${formatDate(testEventDate)}`);
+
+    // 誕生日DMを送信
+    console.log('\n--- DM送信中 ---');
+    sendPreDayDm(testEmployee, EVENT_TYPES.BIRTHDAY, null, testEventDate, gifts);
+
+    console.log('\n=== テスト完了 ✓ ===');
+    console.log('Slackを確認してください。DMが届いているはずです。');
+    console.log('OK/NGボタンを押すと、スプレッドシートの「回答記録」シートが更新されます。');
+
+  } catch (error) {
+    console.error('=== テスト失敗 ===');
+    console.error(`エラー: ${error.message}`);
+    console.error(error.stack);
+  }
+}
+
+/**
+ * 1行目の従業員に前日DMを送信するテスト（入社周年として）
+ * GASエディタから手動実行
+ */
+function testSendPreDayDmAnniversary() {
+  console.log('=== 前日DM送信テスト（入社周年） ===');
+
+  try {
+    const employees = getAllEmployees(false);
+    if (employees.length === 0) {
+      console.error('従業員データがありません');
+      return;
+    }
+
+    const testEmployee = employees[0];
+    console.log(`テスト対象: ${testEmployee.name} (${testEmployee.id})`);
+    console.log(`Slack ID: ${testEmployee.slackId || '(未設定)'}`);
+
+    if (!testEmployee.slackId) {
+      console.error('Slack IDが設定されていません。先にSlack IDを設定してください。');
+      return;
+    }
+
+    const gifts = getAllGifts(false);
+    console.log(`ギフト数: ${gifts.length}件`);
+
+    // 明日の日付を記念日として使用
+    const testEventDate = getTomorrow();
+    const testYears = 3; // テスト用に3年として送信
+    console.log(`テスト記念日: ${formatDate(testEventDate)}`);
+    console.log(`テスト勤続年数: ${testYears}年`);
+
+    // 入社周年DMを送信
+    console.log('\n--- DM送信中 ---');
+    sendPreDayDm(testEmployee, EVENT_TYPES.ANNIVERSARY, testYears, testEventDate, gifts);
+
+    console.log('\n=== テスト完了 ✓ ===');
+    console.log('Slackを確認してください。DMが届いているはずです。');
+    console.log('OK/NGボタンを押すと、スプレッドシートの「回答記録」シートが更新されます。');
+
+  } catch (error) {
+    console.error('=== テスト失敗 ===');
+    console.error(`エラー: ${error.message}`);
+    console.error(error.stack);
+  }
+}
+
+/**
+ * お祝いメッセージ投稿のテスト
+ * ※事前に回答記録シートにOKの記録が必要
+ * GASエディタから手動実行
+ */
+function testSendCelebrationMessage() {
+  console.log('=== お祝いメッセージ投稿テスト ===');
+
+  try {
+    const employees = getAllEmployees(false);
+    if (employees.length === 0) {
+      console.error('従業員データがありません');
+      return;
+    }
+
+    const testEmployee = employees[0];
+    console.log(`テスト対象: ${testEmployee.name} (${testEmployee.id})`);
+
+    if (!testEmployee.slackId) {
+      console.error('Slack IDが設定されていません');
+      return;
+    }
+
+    // テスト用の通知データを作成
+    const gifts = getAllGifts(false);
+    const testGift = gifts.length > 0 ? gifts[0] : null;
+
+    const testNotification = {
+      employeeId: testEmployee.id,
+      eventType: EVENT_TYPES.BIRTHDAY,
+      eventDate: getToday(),
+      giftId: testGift ? testGift.id : null
+    };
+
+    console.log(`イベント種別: ${testNotification.eventType}`);
+    console.log(`ギフト: ${testGift ? testGift.name : '(なし)'}`);
+    console.log(`投稿先チャンネル: ${CELEBRATION_CHANNEL_ID}`);
+
+    if (!CELEBRATION_CHANNEL_ID || CELEBRATION_CHANNEL_ID === 'YOUR_CHANNEL_ID') {
+      console.error('CELEBRATION_CHANNEL_IDが設定されていません。config.gsで設定してください。');
+      return;
+    }
+
+    // お祝いメッセージを投稿
+    console.log('\n--- メッセージ投稿中 ---');
+    postCelebrationMessage(testNotification);
+
+    console.log('\n=== テスト完了 ✓ ===');
+    console.log('指定したチャンネルを確認してください。お祝いメッセージが投稿されているはずです。');
+
+  } catch (error) {
+    console.error('=== テスト失敗 ===');
+    console.error(`エラー: ${error.message}`);
+    console.error(error.stack);
+  }
+}
+
+/**
+ * 1行目の従業員情報を確認
+ */
+function testShowFirstEmployee() {
+  console.log('=== 1行目従業員情報 ===');
+
+  const employees = getAllEmployees(false);
+  if (employees.length === 0) {
+    console.log('従業員データがありません');
+    return;
+  }
+
+  const emp = employees[0];
+  console.log(`氏名: ${emp.name}`);
+  console.log(`社員番号: ${emp.id}`);
+  console.log(`メール: ${emp.email || '(未設定)'}`);
+  console.log(`Slack ID: ${emp.slackId || '(未設定)'}`);
+  console.log(`誕生日: ${emp.birthday ? formatDate(emp.birthday) : '(未設定)'}`);
+  console.log(`入社日: ${emp.hireDate ? formatDate(emp.hireDate) : '(未設定)'}`);
+  console.log(`退職日: ${emp.retiredDate ? formatDate(emp.retiredDate) : '(在籍中)'}`);
+
+  console.log('\n--- ギフト一覧 ---');
+  const gifts = getAllGifts(false);
+  gifts.forEach((g, i) => {
+    console.log(`${i + 1}. ${g.name} (ID: ${g.id})`);
+  });
+}
+
 // ==================== 全体テスト ====================
 
 /**
