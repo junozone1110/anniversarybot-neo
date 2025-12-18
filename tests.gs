@@ -137,6 +137,97 @@ function testSlackIdLookup() {
 // ==================== DM・通知テスト ====================
 
 /**
+ * Slack DM送信のデバッグテスト
+ * APIレスポンスを詳細に確認
+ */
+function testSlackDmDebug() {
+  console.log('=== Slack DM デバッグテスト ===');
+
+  try {
+    const employees = getAllEmployees(false);
+    if (employees.length === 0) {
+      console.error('従業員データがありません');
+      return;
+    }
+
+    const testEmployee = employees[0];
+    const slackId = testEmployee.slackId;
+    console.log(`テスト対象: ${testEmployee.name}`);
+    console.log(`Slack ID: ${slackId}`);
+
+    if (!slackId) {
+      console.error('Slack IDが設定されていません');
+      return;
+    }
+
+    // 1. DMチャンネルを開く
+    console.log('\n--- Step 1: DMチャンネルを開く ---');
+    const token = getSlackBotToken();
+    const openUrl = 'https://slack.com/api/conversations.open';
+    const openPayload = { users: slackId };
+
+    const openOptions = {
+      method: 'post',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=utf-8'
+      },
+      payload: JSON.stringify(openPayload),
+      muteHttpExceptions: true
+    };
+
+    const openResponse = UrlFetchApp.fetch(openUrl, openOptions);
+    const openResult = JSON.parse(openResponse.getContentText());
+    console.log('conversations.open レスポンス:');
+    console.log(JSON.stringify(openResult, null, 2));
+
+    if (!openResult.ok) {
+      console.error(`conversations.open エラー: ${openResult.error}`);
+      return;
+    }
+
+    const channelId = openResult.channel.id;
+    console.log(`DMチャンネルID: ${channelId}`);
+
+    // 2. メッセージを送信
+    console.log('\n--- Step 2: メッセージを送信 ---');
+    const postUrl = 'https://slack.com/api/chat.postMessage';
+    const postPayload = {
+      channel: channelId,
+      text: 'テストメッセージ: Anniversary Botからのテスト送信です。'
+    };
+
+    const postOptions = {
+      method: 'post',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=utf-8'
+      },
+      payload: JSON.stringify(postPayload),
+      muteHttpExceptions: true
+    };
+
+    const postResponse = UrlFetchApp.fetch(postUrl, postOptions);
+    const postResult = JSON.parse(postResponse.getContentText());
+    console.log('chat.postMessage レスポンス:');
+    console.log(JSON.stringify(postResult, null, 2));
+
+    if (postResult.ok) {
+      console.log('\n=== 送信成功 ✓ ===');
+      console.log(`メッセージTS: ${postResult.ts}`);
+    } else {
+      console.error(`\n=== 送信失敗 ===`);
+      console.error(`エラー: ${postResult.error}`);
+    }
+
+  } catch (error) {
+    console.error('=== テスト失敗 ===');
+    console.error(`エラー: ${error.message}`);
+    console.error(error.stack);
+  }
+}
+
+/**
  * 1行目の従業員に前日DMを送信するテスト（誕生日として）
  * GASエディタから手動実行
  */

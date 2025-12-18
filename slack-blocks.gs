@@ -125,6 +125,63 @@ function buildGiftSelectBlocks(employeeId, eventDate, gifts) {
 }
 
 /**
+ * ギフト選択確認用Block Kitメッセージを構築
+ * @param {string} employeeId - 従業員ID
+ * @param {Date} eventDate - 記念日
+ * @param {string} giftId - 選択されたギフトID
+ * @param {string} giftName - 選択されたギフト名
+ * @returns {Array} Block Kit ブロック配列
+ */
+function buildGiftConfirmBlocks(employeeId, eventDate, giftId, giftName) {
+  const actionIdSuffix = `${employeeId}_${formatDate(eventDate)}_${giftId}`;
+
+  const blocks = [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `🎁 *選択したギフト:*\n*${giftName}*`
+      }
+    },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: 'このギフトでよろしいですか？'
+      }
+    },
+    {
+      type: 'actions',
+      elements: [
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: '確定する ✓',
+            emoji: true
+          },
+          style: 'primary',
+          action_id: `${ACTION_ID_PREFIX.GIFT_CONFIRM}${actionIdSuffix}`,
+          value: giftId
+        },
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: '選び直す',
+            emoji: true
+          },
+          action_id: `${ACTION_ID_PREFIX.GIFT_RETRY}${employeeId}_${formatDate(eventDate)}`,
+          value: 'retry'
+        }
+      ]
+    }
+  ];
+
+  return blocks;
+}
+
+/**
  * 当日チャンネル投稿用のBlock Kitメッセージを構築
  * @param {Object} employee - 従業員オブジェクト
  * @param {string} eventType - 記念日種別（'誕生日' または '入社周年'）

@@ -163,12 +163,31 @@ function parseActionId(actionId) {
   const prefixMapping = [
     { prefix: ACTION_ID_PREFIX.APPROVAL_OK, type: 'approval_ok' },
     { prefix: ACTION_ID_PREFIX.APPROVAL_NG, type: 'approval_ng' },
-    { prefix: ACTION_ID_PREFIX.GIFT_SELECT, type: 'gift_select' }
+    { prefix: ACTION_ID_PREFIX.GIFT_SELECT, type: 'gift_select' },
+    { prefix: ACTION_ID_PREFIX.GIFT_CONFIRM, type: 'gift_confirm' },
+    { prefix: ACTION_ID_PREFIX.GIFT_RETRY, type: 'gift_retry' }
   ];
 
   for (const { prefix, type } of prefixMapping) {
     if (actionId.startsWith(prefix)) {
       const suffix = actionId.slice(prefix.length);
+
+      // gift_confirmの場合は employeeId_eventDate_giftId 形式
+      if (type === 'gift_confirm') {
+        const parts = suffix.split('_');
+        if (parts.length < 3) return null;
+        // 最後がgiftId、その前がeventDate（YYYY/MM/DD）
+        const giftId = parts.pop();
+        const eventDateStr = parts.pop();
+        const employeeId = parts.join('_');
+        return {
+          type: type,
+          employeeId: employeeId,
+          eventDateStr: eventDateStr,
+          giftId: giftId
+        };
+      }
+
       const parsed = parseActionIdSuffix(suffix);
       if (!parsed) return null;
 
@@ -226,20 +245,39 @@ function handleInteractiveAction(payload) {
     handleApprovalAction(validatedEmployeeId, eventDate, approval, responseUrl);
 
   } else if (parsed.type === 'gift_select') {
-    // ギフト選択の処理
+    // ギフト選択の処理（確認画面を表示）
     const giftId = action.selected_option?.value;
     if (!giftId) {
       logError('ギフトIDが取得できません', new Error('No gift ID'));
       return;
     }
-    // ギフトIDのバリデーション
     const validatedGiftId = validateGiftId(giftId);
     if (!validatedGiftId) {
       logError(`ギフトIDバリデーションエラー: ${giftId}`, new Error('Invalid gift ID'));
       return;
     }
-    logDebug(`ギフト選択処理: ${validatedEmployeeId}, ギフトID: ${validatedGiftId}`);
+    logDebug(`ギフト選択（確認画面表示）: ${validatedEmployeeId}, ギフトID: ${validatedGiftId}`);
     handleGiftSelectAction(validatedEmployeeId, eventDate, validatedGiftId, responseUrl);
+
+  } else if (parsed.type === 'gift_confirm') {
+    // ギフト確定の処理
+    const giftId = parsed.giftId;
+    if (!giftId) {
+      logError('ギフトIDが取得できません', new Error('No gift ID'));
+      return;
+    }
+    const validatedGiftId = validateGiftId(giftId);
+    if (!validatedGiftId) {
+      logError(`ギフトIDバリデーションエラー: ${giftId}`, new Error('Invalid gift ID'));
+      return;
+    }
+    logDebug(`ギフト確定処理: ${validatedEmployeeId}, ギフトID: ${validatedGiftId}`);
+    handleGiftConfirmAction(validatedEmployeeId, eventDate, validatedGiftId, responseUrl);
+
+  } else if (parsed.type === 'gift_retry') {
+    // ギフト選び直しの処理
+    logDebug(`ギフト選び直し: ${validatedEmployeeId}`);
+    handleGiftRetryAction(validatedEmployeeId, eventDate, responseUrl);
   }
 }
 
@@ -272,13 +310,35 @@ function handleApprovalAction(employeeId, eventDate, approval, responseUrl) {
 }
 
 /**
- * ギフト選択アクションを処理
+ * ギフト選択アクションを処理（確認画面を表示）
  * @param {string} employeeId - 従業員ID
  * @param {Date} eventDate - 記念日
  * @param {string} giftId - ギフトID
  * @param {string} responseUrl - Slack response URL
  */
 function handleGiftSelectAction(employeeId, eventDate, giftId, responseUrl) {
+  try {
+    // ギフト名を取得
+    const gift = getGiftById(giftId);
+    const giftName = gift ? gift.name : giftId;
+
+    // 確認画面を表示（まだ保存しない）
+    const blocks = buildGiftConfirmBlocks(employeeId, eventDate, giftId, giftName);
+    sendResponseUrlMessage(responseUrl, blocks);
+  } catch (error) {
+    logError('ギフト選択処理でエラー', error);
+    notifyAdminError(`ギフト選択処理でエラー: ${error.message}`);
+  }
+}
+
+/**
+ * ギフト確定アクションを処理
+ * @param {string} employeeId - 従業員ID
+ * @param {Date} eventDate - 記念日
+ * @param {string} giftId - ギフトID
+ * @param {string} responseUrl - Slack response URL
+ */
+function handleGiftConfirmAction(employeeId, eventDate, giftId, responseUrl) {
   try {
     // スプレッドシートを更新
     updateResponseGift(employeeId, eventDate, giftId);
@@ -287,17 +347,32 @@ function handleGiftSelectAction(employeeId, eventDate, giftId, responseUrl) {
     const gift = getGiftById(giftId);
     const giftName = gift ? gift.name : giftId;
 
-    // 現在の回答記録を取得
-    const response = getResponseByEmployeeAndDate(employeeId, eventDate);
+    // 完了メッセージを表示
+    const blocks = buildResponseConfirmationBlocks(APPROVAL_VALUES.OK, giftName);
+    sendResponseUrlMessage(responseUrl, blocks);
 
-    // OKが選択されている場合のみ確認メッセージを更新
-    if (response && response.approval === APPROVAL_VALUES.OK) {
-      const blocks = buildResponseConfirmationBlocks(APPROVAL_VALUES.OK, giftName);
-      sendResponseUrlMessage(responseUrl, blocks);
-    }
+    logDebug(`ギフト確定完了: ${employeeId}, ${giftName}`);
   } catch (error) {
-    logError('ギフト選択処理でエラー', error);
-    notifyAdminError(`ギフト選択処理でエラー: ${error.message}`);
+    logError('ギフト確定処理でエラー', error);
+    notifyAdminError(`ギフト確定処理でエラー: ${error.message}`);
+  }
+}
+
+/**
+ * ギフト選び直しアクションを処理
+ * @param {string} employeeId - 従業員ID
+ * @param {Date} eventDate - 記念日
+ * @param {string} responseUrl - Slack response URL
+ */
+function handleGiftRetryAction(employeeId, eventDate, responseUrl) {
+  try {
+    // ギフト選択画面を再表示
+    const gifts = getAllGifts();
+    const blocks = buildGiftSelectBlocks(employeeId, eventDate, gifts);
+    sendResponseUrlMessage(responseUrl, blocks);
+  } catch (error) {
+    logError('ギフト選び直し処理でエラー', error);
+    notifyAdminError(`ギフト選び直し処理でエラー: ${error.message}`);
   }
 }
 

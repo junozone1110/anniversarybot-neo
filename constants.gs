@@ -81,7 +81,9 @@ const MESSAGE_TEMPLATES = {
 const ACTION_ID_PREFIX = {
   APPROVAL_OK: 'approval_ok_',
   APPROVAL_NG: 'approval_ng_',
-  GIFT_SELECT: 'gift_select_'
+  GIFT_SELECT: 'gift_select_',
+  GIFT_CONFIRM: 'gift_confirm_',
+  GIFT_RETRY: 'gift_retry_'
 };
 
 // ==================== ログレベル ====================
