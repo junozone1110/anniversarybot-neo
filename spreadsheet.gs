@@ -451,10 +451,12 @@ function upsertEmployees(employees) {
  * 全従業員のSlack IDをメールアドレスから取得して更新
  * 手動実行用の関数
  * @param {boolean} activeOnly - 在籍中のみ対象とするか（デフォルト: true）
+ * @param {boolean} syncToSmartHr - SmartHRにも同期するか（デフォルト: true）
  */
-function updateAllSlackIds(activeOnly = true) {
+function updateAllSlackIds(activeOnly = true, syncToSmartHr = true) {
   console.log('=== Slack ID一括更新処理を開始 ===');
   console.log(`対象: ${activeOnly ? '在籍中のみ' : '全員'}`);
+  console.log(`SmartHR同期: ${syncToSmartHr ? '有効' : '無効'}`);
 
   const sheet = getSheet(SHEET_NAMES.EMPLOYEES);
   const data = sheet.getDataRange().getValues();
@@ -464,6 +466,9 @@ function updateAllSlackIds(activeOnly = true) {
   let alreadySetCount = 0;
   let noEmailCount = 0;
   let retiredCount = 0;
+
+  // SmartHR同期用: 更新した従業員のリスト
+  const updatedEmployees = [];
 
   // ヘッダー行をスキップ
   for (let i = 1; i < data.length; i++) {
@@ -503,6 +508,13 @@ function updateAllSlackIds(activeOnly = true) {
       sheet.getRange(i + 1, EMPLOYEE_COLUMNS.SLACK_ID + 1).setValue(user.id);
       console.log(`[更新] ${name}: ${user.id}`);
       updatedCount++;
+
+      // SmartHR同期用にリストに追加
+      updatedEmployees.push({
+        empCode: String(empCode),
+        slackId: user.id,
+        name: name
+      });
     } else {
       console.log(`[未発見] ${name}: ${email}`);
       notFoundCount++;
@@ -515,7 +527,7 @@ function updateAllSlackIds(activeOnly = true) {
   // キャッシュをクリア
   clearCache();
 
-  console.log('\n=== 処理完了 ===');
+  console.log('\n=== スプレッドシート更新完了 ===');
   console.log(`更新: ${updatedCount}件`);
   console.log(`既存: ${alreadySetCount}件`);
   console.log(`未発見: ${notFoundCount}件`);
@@ -523,12 +535,58 @@ function updateAllSlackIds(activeOnly = true) {
   if (activeOnly) {
     console.log(`退職者スキップ: ${retiredCount}件`);
   }
+
+  // SmartHRに同期
+  // TODO: SmartHR APIトークンの権限追加後にコメントアウトを解除
+  // if (syncToSmartHr && updatedEmployees.length > 0) {
+  //   console.log('\n=== SmartHRへの同期を開始 ===');
+  //   syncUpdatedSlackIdsToSmartHr(updatedEmployees);
+  // }
+}
+
+/**
+ * 更新された従業員のSlack IDをSmartHRに同期
+ * @param {Array<{empCode: string, slackId: string, name: string}>} employees - 更新された従業員リスト
+ */
+function syncUpdatedSlackIdsToSmartHr(employees) {
+  try {
+    // カスタムフィールドテンプレートIDを取得
+    const templateId = getSlackIdCustomFieldTemplateId();
+    if (!templateId) {
+      console.log('SmartHRにSlack IDカスタムフィールドがないため、同期をスキップ');
+      return;
+    }
+
+    let syncedCount = 0;
+    let errorCount = 0;
+
+    for (const emp of employees) {
+      const success = syncSingleSlackIdToSmartHr(emp.empCode, emp.slackId);
+      if (success) {
+        console.log(`[SmartHR同期] ${emp.name}: ${emp.slackId}`);
+        syncedCount++;
+      } else {
+        console.log(`[SmartHR同期エラー] ${emp.name}`);
+        errorCount++;
+      }
+
+      // レート制限対策
+      Utilities.sleep(API_CONFIG.RATE_LIMIT_DELAY_MS);
+    }
+
+    console.log(`\nSmartHR同期完了: 成功${syncedCount}件, エラー${errorCount}件`);
+
+  } catch (error) {
+    logError('SmartHR同期でエラー', error);
+    console.error('SmartHR同期でエラーが発生しました');
+  }
 }
 
 /**
  * 在籍中従業員のSlack IDのみ更新（退職者を除く）
+ * @param {boolean} syncToSmartHr - SmartHRにも同期するか（デフォルト: true）
  */
-function updateActiveEmployeeSlackIds() {
-  updateAllSlackIds(true);
+function updateActiveEmployeeSlackIds(syncToSmartHr = true) {
+  updateAllSlackIds(true, syncToSmartHr);
 }
 

@@ -370,3 +370,214 @@ function syncAllEmployeesFromSmartHr(updateSlackIds = true) {
     throw error;
   }
 }
+
+// ==================== SmartHRへのSlack ID書き戻し ====================
+
+/**
+ * SmartHR APIを呼び出す共通関数（PATCH）
+ * @param {string} endpoint - APIエンドポイント
+ * @param {Object} payload - リクエストボディ
+ * @returns {Object} APIレスポンス
+ */
+function callSmartHrApiPatch(endpoint, payload) {
+  const token = getSmartHrAccessToken();
+
+  if (!SMARTHR_SUBDOMAIN || SMARTHR_SUBDOMAIN === 'YOUR_SUBDOMAIN') {
+    throw new Error('SMARTHR_SUBDOMAIN が設定されていません。config.gsで設定してください。');
+  }
+
+  const url = `https://${SMARTHR_SUBDOMAIN}.smarthr.jp/api/v1/${endpoint}`;
+
+  const options = {
+    method: 'patch',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const responseCode = response.getResponseCode();
+
+  if (responseCode >= 400) {
+    const errorBody = response.getContentText();
+    logError(`SmartHR API PATCH Error (${endpoint})`, new Error(`HTTP ${responseCode}: ${errorBody}`));
+    throw new Error(`SmartHR API Error: HTTP ${responseCode}`);
+  }
+
+  const data = safeJsonParse(response.getContentText());
+  return data;
+}
+
+/**
+ * Slack IDカスタムフィールドのテンプレートIDを取得
+ * @returns {string|null} テンプレートID（見つからない場合はnull）
+ */
+function getSlackIdCustomFieldTemplateId() {
+  // キャッシュから取得を試みる
+  const cache = CacheService.getScriptCache();
+  const cachedId = cache.get('slack_id_template_id');
+  if (cachedId) {
+    return cachedId;
+  }
+
+  // APIから従業員カスタムフィールドテンプレート一覧を取得
+  // SmartHR APIエンドポイント: /api/v1/crew_custom_field_templates
+  logDebug('カスタムフィールドテンプレート一覧を取得');
+  const result = callSmartHrApi('crew_custom_field_templates', { per_page: 100 });
+  const templates = result.data;
+
+  if (!templates || templates.length === 0) {
+    logDebug('カスタムフィールドテンプレートが存在しません');
+    return null;
+  }
+
+  // Slack ID用のテンプレートを検索
+  for (const template of templates) {
+    if (template.name === SMARTHR_SLACK_ID_FIELD_NAME) {
+      logDebug(`Slack IDテンプレートID: ${template.id}`);
+      // キャッシュに保存（1時間）
+      cache.put('slack_id_template_id', template.id, 3600);
+      return template.id;
+    }
+  }
+
+  logDebug(`カスタムフィールド "${SMARTHR_SLACK_ID_FIELD_NAME}" が見つかりません`);
+  return null;
+}
+
+/**
+ * SmartHRの従業員にSlack IDを更新
+ * @param {string} crewId - SmartHRの従業員ID（内部ID）
+ * @param {string} slackId - 更新するSlack ID
+ * @param {string} templateId - カスタムフィールドテンプレートID
+ * @returns {boolean} 成功したらtrue
+ */
+function updateCrewSlackIdInSmartHr(crewId, slackId, templateId) {
+  try {
+    const payload = {
+      custom_fields: [
+        {
+          custom_field_template_id: templateId,
+          value: slackId
+        }
+      ]
+    };
+
+    callSmartHrApiPatch(`crews/${crewId}`, payload);
+    return true;
+
+  } catch (error) {
+    logError(`SmartHR Slack ID更新エラー (crewId: ${crewId})`, error);
+    return false;
+  }
+}
+
+/**
+ * スプレッドシートのSlack IDをSmartHRに同期
+ * Slack IDが設定されている従業員のみを対象
+ */
+function syncSlackIdsToSmartHr() {
+  console.log('=== SmartHRへのSlack ID同期を開始 ===');
+
+  try {
+    // 1. カスタムフィールドテンプレートIDを取得
+    const templateId = getSlackIdCustomFieldTemplateId();
+    if (!templateId) {
+      console.error('Slack IDカスタムフィールドテンプレートが見つかりません');
+      console.log('SmartHRの管理画面でカスタム項目を作成してください');
+      return;
+    }
+
+    // 2. SmartHRから全従業員を取得（社員番号とSmartHR IDのマッピング用）
+    const crews = getAllCrewsFromSmartHr();
+    const empCodeToCrewId = {};
+    for (const crew of crews) {
+      if (crew.emp_code) {
+        empCodeToCrewId[crew.emp_code] = crew.id;
+      }
+    }
+
+    // 3. スプレッドシートから従業員データを取得
+    const employees = getAllEmployees(false);
+
+    let updatedCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+
+    // 4. Slack IDがある従業員をSmartHRに更新
+    for (const emp of employees) {
+      // Slack IDがない場合はスキップ
+      if (!emp.slackId) {
+        skippedCount++;
+        continue;
+      }
+
+      // SmartHRの従業員IDを取得
+      const crewId = empCodeToCrewId[emp.id];
+      if (!crewId) {
+        console.log(`[スキップ] ${emp.name}: SmartHRに従業員が見つかりません`);
+        skippedCount++;
+        continue;
+      }
+
+      // SmartHRを更新
+      const success = updateCrewSlackIdInSmartHr(crewId, emp.slackId, templateId);
+      if (success) {
+        console.log(`[更新] ${emp.name}: ${emp.slackId}`);
+        updatedCount++;
+      } else {
+        errorCount++;
+      }
+
+      // レート制限対策
+      Utilities.sleep(API_CONFIG.RATE_LIMIT_DELAY_MS);
+    }
+
+    console.log('\n=== 処理完了 ===');
+    console.log(`更新: ${updatedCount}件`);
+    console.log(`スキップ: ${skippedCount}件`);
+    console.log(`エラー: ${errorCount}件`);
+
+  } catch (error) {
+    logError('SmartHRへのSlack ID同期でエラー', error);
+    throw error;
+  }
+}
+
+/**
+ * 単一従業員のSlack IDをSmartHRに更新
+ * @param {string} empCode - 社員番号
+ * @param {string} slackId - Slack ID
+ * @returns {boolean} 成功したらtrue
+ */
+function syncSingleSlackIdToSmartHr(empCode, slackId) {
+  try {
+    // カスタムフィールドテンプレートIDを取得
+    const templateId = getSlackIdCustomFieldTemplateId();
+    if (!templateId) {
+      logDebug('Slack IDカスタムフィールドテンプレートが見つかりません');
+      return false;
+    }
+
+    // SmartHRから該当従業員を検索
+    const result = callSmartHrApi('crews', { emp_code: empCode });
+    const crews = result.data;
+
+    if (!crews || crews.length === 0) {
+      logDebug(`SmartHRに従業員が見つかりません: ${empCode}`);
+      return false;
+    }
+
+    const crewId = crews[0].id;
+
+    // SmartHRを更新
+    return updateCrewSlackIdInSmartHr(crewId, slackId, templateId);
+
+  } catch (error) {
+    logError(`単一Slack ID同期エラー (${empCode})`, error);
+    return false;
+  }
+}

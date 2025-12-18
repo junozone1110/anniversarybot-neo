@@ -4,18 +4,22 @@
 
 ## 機能
 
-- **前日DM通知**: 翌日が記念日の従業員にDMで確認（OK/NG選択 + ギフト選択）
+- **前日DM通知**: 翌日が記念日の従業員にDMで確認（OK/NG選択）
+- **ギフト選択**: OKの場合、希望するギフトを選択 → 確認画面 → 確定
 - **当日チャンネル投稿**: OKと回答した従業員のお祝いメッセージをチャンネルに投稿
-- **ギフト選択**: 従業員が希望するギフトを選択可能
 - **SmartHR連携**: 従業員情報をSmartHR APIから自動同期（差分更新対応）
+- **Slack ID自動取得**: メールアドレスからSlack IDを自動取得・SmartHRに書き戻し
 
 ## 処理フロー
 
 ```
+[毎日 02:00頃]
+  └─ SmartHRから従業員情報を同期（差分更新）
+
 [前日 12:00頃]
   ├─ 対象従業員を抽出
   ├─ DMで通知（OK/NG選択）
-  ├─ OK選択時にギフト選択
+  ├─ OK選択 → ギフト選択 → 確認 → 確定
   └─ 回答をスプレッドシートに記録
 
 [当日 13:00頃]
@@ -27,12 +31,12 @@
 
 ```
 ├── config.gs        # 設定値（スプレッドシートID、チャンネルID、SmartHR設定）
-├── constants.gs     # 定数定義（イベント種別、承認値、ログレベル等）
+├── constants.gs     # 定数定義（イベント種別、承認値、アクションID、ログレベル等）
 ├── utils.gs         # ユーティリティ関数（日付計算、ログ出力、バリデーション）
-├── spreadsheet.gs   # スプレッドシート読み書き関数
+├── spreadsheet.gs   # スプレッドシート読み書き・Slack ID更新
 ├── slack-api.gs     # Slack API関連関数
 ├── slack-blocks.gs  # Block Kitメッセージ構築
-├── smarthr.gs       # SmartHR API連携
+├── smarthr.gs       # SmartHR API連携（読み取り・書き戻し）
 ├── webapp.gs        # Web App（doPost）- Interactivity処理
 ├── main.gs          # メイン処理（トリガー実行）
 └── tests.gs         # テスト関数
@@ -81,6 +85,12 @@
 2. `config.gs` の `SMARTHR_SUBDOMAIN` を設定
 3. スクリプトプロパティに `SMARTHR_ACCESS_TOKEN` を追加
 
+**Slack ID書き戻し機能を使う場合（任意）:**
+- SmartHRにカスタム項目「slack_id」を作成
+- APIトークンに以下の権限を追加:
+  - 従業員カスタム項目テンプレートの読み取り
+  - 従業員の書き込み
+
 ### 4. GASプロジェクトの設定
 
 1. https://script.google.com で新規プロジェクト作成
@@ -107,6 +117,7 @@
 ### 6. トリガーの設定
 
 GASエディタで `setupTriggers` 関数を実行:
+- 毎日02:00 → SmartHR同期
 - 毎日12:00 → 前日DM通知
 - 毎日13:00 → 当日お祝い投稿
 
@@ -125,7 +136,13 @@ GASエディタで `setupTriggers` 関数を実行:
 ### SmartHR連携
 
 - `syncEmployeesFromSmartHr`: 従業員情報をSmartHRから同期（差分更新）
+- `syncAllEmployeesFromSmartHr`: 全従業員を強制同期
+- `syncSlackIdsToSmartHr`: スプレッドシートのSlack IDをSmartHRに書き戻し
+
+### Slack ID更新
+
 - `updateActiveEmployeeSlackIds`: 在籍中従業員のSlack IDをメールアドレスから取得
+- `updateAllSlackIds`: 全従業員のSlack IDを更新（退職者含む）
 
 ### テスト関数
 
@@ -139,6 +156,7 @@ GASエディタで `setupTriggers` 関数を実行:
 - `testSendPreDayDmBirthday`: 1行目の従業員に誕生日DMを送信
 - `testSendPreDayDmAnniversary`: 1行目の従業員に入社周年DMを送信
 - `testSendCelebrationMessage`: お祝いメッセージをチャンネルに投稿
+- `testSlackDmDebug`: Slack DM送信のデバッグ
 
 ## テスト手順
 
@@ -161,6 +179,8 @@ testSendPreDayDmAnniversary   // 入社3年として送信
 - テスト従業員にDMが届く
 - OK/NGボタンを押してインタラクション動作を確認
 - OKを押すとギフト選択画面が表示される
+- ギフトを選択すると確認画面が表示される
+- 「確定する」または「選び直す」で操作
 - 「回答記録」シートに記録が追加される
 
 ### 4. お祝いメッセージ投稿テスト
@@ -188,6 +208,7 @@ testSendCelebrationMessage
 - トリガーの実行時刻は±15分のズレがある場合がある
 - Botをお祝い投稿先チャンネルに招待しておく必要がある
 - SmartHR連携は差分更新に対応（`updated_at`フィールドを使用）
+- Slackの3秒ルールにより、ボタン操作時に警告が出ることがありますが、処理は正常に完了します
 
 ## ライセンス
 

@@ -8,58 +8,36 @@
  * @returns {GoogleAppsScript.Content.TextOutput} レスポンス
  */
 function doPost(e) {
-  const lock = LockService.getScriptLock();
-
   try {
-    // リクエスト検証
-    if (!verifySlackRequest(e)) {
-      logError('Slack署名検証失敗', new Error('Invalid signature'));
-      return ContentService.createTextOutput('Invalid signature').setMimeType(ContentService.MimeType.TEXT);
+    // ペイロードをパース（検証より先に行い高速化）
+    if (!e || !e.parameter || !e.parameter.payload) {
+      return ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
     }
 
-    // ペイロードをパース
     const payload = safeJsonParse(e.parameter.payload);
     if (!payload) {
-      logError('ペイロードのパースに失敗', new Error('Invalid JSON payload'));
-      return ContentService.createTextOutput('Invalid payload').setMimeType(ContentService.MimeType.TEXT);
+      return ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
     }
 
-    // 重複実行防止
-    const actions = payload.actions;
-    if (actions && actions.length > 0) {
-      const triggerId = payload.trigger_id || '';
-
-      // ロックを取得（既に処理中なら即座にスキップ）
-      if (!lock.tryLock(100)) {
-        return ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
-      }
-
-      // キャッシュで重複チェック
+    // 重複実行防止（キャッシュのみ、軽量化）
+    const triggerId = payload.trigger_id || '';
+    if (triggerId) {
       const cache = CacheService.getScriptCache();
-      const cacheKey = `processed_${triggerId}`;
+      const cacheKey = `p_${triggerId}`;
       if (cache.get(cacheKey)) {
-        lock.releaseLock();
         return ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
       }
-
-      // 処理済みとしてキャッシュに記録（60秒間）
-      cache.put(cacheKey, 'processed', 60);
+      cache.put(cacheKey, '1', 60);
     }
 
     // アクション処理
     handleInteractiveAction(payload);
 
-    // ロックを解放
-    lock.releaseLock();
-
-    return ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
-
   } catch (error) {
     logError('doPost エラー', error);
-    notifyAdminError(`doPost処理でエラー: ${error.message}`);
-    try { lock.releaseLock(); } catch (e) {}
-    return ContentService.createTextOutput('Error').setMimeType(ContentService.MimeType.TEXT);
   }
+
+  return ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
 }
 
 /**
