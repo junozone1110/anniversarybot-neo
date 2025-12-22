@@ -1,0 +1,36 @@
+# 2024-12-23_21-50_clasp-setup-and-claude-md
+
+## 更新日時
+2024-12-23 21:50
+
+## 変更ファイル
+- .clasp.json（新規）
+- .claspignore（新規）
+- appsscript.json（新規）
+- config.gs
+- smarthr.gs
+- spreadsheet.gs
+- tests.gs
+- CLAUDE.md（新規）
+
+## 変更内容
+
+### clasp連携の追加
+- claspをセットアップし、GASプロジェクトとローカルリポジトリを同期可能に
+- .claspignoreでREADME.md等の不要ファイルを除外
+
+### SmartHR Slack ID書き戻し機能の修正
+- config.gs: SMARTHR_SLACK_ID_FIELD_NAME を 'SlackID' に修正
+- config.gs: SMARTHR_SLACK_ID_TEMPLATE_ID を追加（従業員詳細APIから取得した値）
+- smarthr.gs: PATCHリクエストのパラメータ名を `custom_field_template_id` から `template_id` に修正
+- smarthr.gs: extractSlackIdFromCustomFields で `field.template?.name` をチェックするよう修正
+- spreadsheet.gs: SmartHR同期処理のコメントアウトを解除して有効化
+
+### CLAUDE.md の作成
+- プロジェクト概要、claspコマンド、アーキテクチャ説明を記載
+- Gitプッシュ時のcommit_logルールを追加
+
+## 背景
+- GASとGitHubのコード同期を効率化するためclaspを導入
+- SmartHR APIのPATCHリクエストで400エラー（"custom_fields には template_id を指定してください"）が発生していた問題を解決
+- 今後のClaude Code作業効率化のためCLAUDE.mdを作成
