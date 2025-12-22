@@ -1,0 +1,7 @@
+# Ignore files
+README.md
+.git/**
+.gitignore
+.DS_Store
+.claude/**
+node_modules/**

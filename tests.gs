@@ -448,3 +448,162 @@ function testAllConnections() {
   console.log('=== テスト完了 ===');
   console.log('========================================');
 }
+
+// ==================== SmartHR Slack ID 書き戻しテスト ====================
+
+/**
+ * 1行目の従業員のカスタムフィールド構造を確認
+ * Slack IDフィールドの名前を特定するため
+ */
+function testSmartHrCustomFieldsStructure() {
+  console.log('=== SmartHR 従業員カスタムフィールド構造確認 ===');
+
+  try {
+    // スプレッドシートから1行目の従業員の社員番号を取得
+    const employees = getAllEmployees(false);
+    if (employees.length === 0) {
+      console.error('従業員データがありません');
+      return;
+    }
+
+    const empCode = employees[0].id;
+    console.log(`対象従業員の社員番号: ${empCode}`);
+
+    // SmartHRから該当従業員を検索
+    console.log('\n--- SmartHRから従業員を検索 ---');
+    const searchResult = callSmartHrApi('crews', { emp_code: empCode });
+
+    if (!searchResult.data || searchResult.data.length === 0) {
+      console.error('SmartHRで従業員が見つかりません');
+      return;
+    }
+
+    const crewId = searchResult.data[0].id;
+    console.log(`SmartHR従業員ID: ${crewId}`);
+
+    // 従業員詳細を取得
+    console.log('\n--- 従業員詳細を取得 ---');
+    const detail = getCrewDetail(crewId);
+
+    console.log(`氏名: ${detail.last_name} ${detail.first_name}`);
+    console.log(`メール: ${detail.email || '(未設定)'}`);
+
+    // カスタムフィールドを詳細に出力
+    console.log('\n--- カスタムフィールド一覧（生データ） ---');
+    if (detail.custom_fields && detail.custom_fields.length > 0) {
+      detail.custom_fields.forEach((field, i) => {
+        console.log(`\n[${i + 1}] カスタムフィールド:`);
+        console.log(`  name: ${field.name || '(なし)'}`);
+        console.log(`  value: ${field.value || '(空)'}`);
+        if (field.custom_field_template) {
+          console.log(`  template.id: ${field.custom_field_template.id}`);
+          console.log(`  template.name: ${field.custom_field_template.name}`);
+        }
+        // Slack IDっぽいフィールドをハイライト
+        const fieldName = (field.custom_field_template?.name || field.name || '').toLowerCase();
+        if (fieldName.includes('slack') || fieldName.includes('スラック')) {
+          console.log('  ★ これがSlack IDフィールドの可能性があります');
+        }
+      });
+    } else {
+      console.log('カスタムフィールドがありません');
+    }
+
+    // 生のJSONも出力
+    console.log('\n--- カスタムフィールド JSON ---');
+    console.log(JSON.stringify(detail.custom_fields, null, 2));
+
+  } catch (error) {
+    console.error('=== テスト失敗 ===');
+    console.error(`エラー: ${error.message}`);
+    console.error(error.stack);
+  }
+}
+
+/**
+ * 1行目の従業員のSlack IDをSmartHRに登録するテスト
+ */
+function testSyncSlackIdToSmartHr() {
+  console.log('=== SmartHR Slack ID 登録テスト ===');
+
+  try {
+    // 1. スプレッドシートから1行目の従業員を取得
+    const employees = getAllEmployees(false);
+    if (employees.length === 0) {
+      console.error('従業員データがありません');
+      return;
+    }
+
+    const emp = employees[0];
+    console.log(`テスト対象: ${emp.name} (社員番号: ${emp.id})`);
+    console.log(`Slack ID: ${emp.slackId || '(未設定)'}`);
+
+    if (!emp.slackId) {
+      console.error('Slack IDが設定されていません。先にSlack IDを取得してください。');
+      return;
+    }
+
+    // 2. カスタムフィールドテンプレートIDを取得（権限テスト）
+    console.log('\n--- Step 1: カスタムフィールドテンプレート取得 ---');
+    const templateId = getSlackIdCustomFieldTemplateId();
+
+    if (!templateId) {
+      console.error('Slack IDカスタムフィールドが見つかりません');
+      console.log('SmartHRの管理画面で「slack_id」という名前のカスタム項目を作成してください');
+      return;
+    }
+    console.log(`テンプレートID: ${templateId}`);
+
+    // 3. SmartHRに登録
+    console.log('\n--- Step 2: SmartHRに登録 ---');
+    const success = syncSingleSlackIdToSmartHr(emp.id, emp.slackId);
+
+    if (success) {
+      console.log('\n=== 登録成功 ✓ ===');
+      console.log(`${emp.name} のSlack ID (${emp.slackId}) をSmartHRに登録しました`);
+    } else {
+      console.error('\n=== 登録失敗 ===');
+    }
+
+  } catch (error) {
+    console.error('=== テスト失敗 ===');
+    console.error(`エラー: ${error.message}`);
+    console.error(error.stack);
+  }
+}
+
+/**
+ * SmartHR カスタムフィールドテンプレート一覧を確認
+ * 権限テスト用
+ */
+function testSmartHrCustomFieldTemplates() {
+  console.log('=== SmartHR カスタムフィールドテンプレート確認 ===');
+
+  try {
+    const result = callSmartHrApi('crew_custom_field_templates', { per_page: 100 });
+    const templates = result.data;
+
+    console.log(`取得件数: ${templates.length}件\n`);
+
+    templates.forEach((t, i) => {
+      console.log(`${i + 1}. ${t.name} (ID: ${t.id})`);
+    });
+
+    // slack_id を探す
+    const slackIdTemplate = templates.find(t => t.name === SMARTHR_SLACK_ID_FIELD_NAME);
+    if (slackIdTemplate) {
+      console.log(`\n✓ "${SMARTHR_SLACK_ID_FIELD_NAME}" テンプレート発見: ${slackIdTemplate.id}`);
+    } else {
+      console.log(`\n✗ "${SMARTHR_SLACK_ID_FIELD_NAME}" テンプレートが見つかりません`);
+      console.log('SmartHRの管理画面でカスタム項目を作成してください');
+    }
+
+  } catch (error) {
+    console.error('=== テスト失敗 ===');
+    console.error(`エラー: ${error.message}`);
+    if (error.message.includes('403')) {
+      console.error('\nAPIトークンに「従業員カスタム項目テンプレート」の読み取り権限がありません');
+      console.error('SmartHR管理画面でAPIトークンの権限を追加してください');
+    }
+  }
+}

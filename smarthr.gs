@@ -164,7 +164,8 @@ function extractSlackIdFromCustomFields(customFields) {
 
   for (const field of customFields) {
     // カスタムフィールドのテンプレート名または名前で検索
-    const fieldName = field.custom_field_template?.name || field.name || '';
+    // SmartHR APIは `template` または `custom_field_template` でテンプレート情報を返す
+    const fieldName = field.template?.name || field.custom_field_template?.name || field.name || '';
 
     if (fieldName === SMARTHR_SLACK_ID_FIELD_NAME) {
       return field.value || '';
@@ -416,6 +417,11 @@ function callSmartHrApiPatch(endpoint, payload) {
  * @returns {string|null} テンプレートID（見つからない場合はnull）
  */
 function getSlackIdCustomFieldTemplateId() {
+  // config.gsに直接設定されている場合はそれを使用
+  if (typeof SMARTHR_SLACK_ID_TEMPLATE_ID !== 'undefined' && SMARTHR_SLACK_ID_TEMPLATE_ID) {
+    return SMARTHR_SLACK_ID_TEMPLATE_ID;
+  }
+
   // キャッシュから取得を試みる
   const cache = CacheService.getScriptCache();
   const cachedId = cache.get('slack_id_template_id');
@@ -425,27 +431,34 @@ function getSlackIdCustomFieldTemplateId() {
 
   // APIから従業員カスタムフィールドテンプレート一覧を取得
   // SmartHR APIエンドポイント: /api/v1/crew_custom_field_templates
-  logDebug('カスタムフィールドテンプレート一覧を取得');
-  const result = callSmartHrApi('crew_custom_field_templates', { per_page: 100 });
-  const templates = result.data;
+  // ※ この機能を使うにはAPIトークンに「カスタムフィールド」の読み取り権限が必要
+  try {
+    logDebug('カスタムフィールドテンプレート一覧を取得');
+    const result = callSmartHrApi('crew_custom_field_templates', { per_page: 100 });
+    const templates = result.data;
 
-  if (!templates || templates.length === 0) {
-    logDebug('カスタムフィールドテンプレートが存在しません');
+    if (!templates || templates.length === 0) {
+      logDebug('カスタムフィールドテンプレートが存在しません');
+      return null;
+    }
+
+    // Slack ID用のテンプレートを検索
+    for (const template of templates) {
+      if (template.name === SMARTHR_SLACK_ID_FIELD_NAME) {
+        logDebug(`Slack IDテンプレートID: ${template.id}`);
+        // キャッシュに保存（1時間）
+        cache.put('slack_id_template_id', template.id, 3600);
+        return template.id;
+      }
+    }
+
+    logDebug(`カスタムフィールド "${SMARTHR_SLACK_ID_FIELD_NAME}" が見つかりません`);
+    return null;
+
+  } catch (error) {
+    logError('カスタムフィールドテンプレート取得エラー', error);
     return null;
   }
-
-  // Slack ID用のテンプレートを検索
-  for (const template of templates) {
-    if (template.name === SMARTHR_SLACK_ID_FIELD_NAME) {
-      logDebug(`Slack IDテンプレートID: ${template.id}`);
-      // キャッシュに保存（1時間）
-      cache.put('slack_id_template_id', template.id, 3600);
-      return template.id;
-    }
-  }
-
-  logDebug(`カスタムフィールド "${SMARTHR_SLACK_ID_FIELD_NAME}" が見つかりません`);
-  return null;
 }
 
 /**
@@ -460,7 +473,7 @@ function updateCrewSlackIdInSmartHr(crewId, slackId, templateId) {
     const payload = {
       custom_fields: [
         {
-          custom_field_template_id: templateId,
+          template_id: templateId,
           value: slackId
         }
       ]

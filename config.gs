@@ -20,8 +20,8 @@ const SHEET_NAMES = {
   RESPONSES: '回答記録'
 };
 
-// Slack チャンネルID（お祝いメッセージ投稿先）（要変更）
-const CELEBRATION_CHANNEL_ID = 'YOUR_CHANNEL_ID';
+// Slack チャンネルID（お祝いメッセージ投稿先）
+const CELEBRATION_CHANNEL_ID = 'C0A3GJ8HG49';
 
 // 入社周年の対象年数
 const ANNIVERSARY_YEARS = [1, 3, 5, 10];
@@ -32,7 +32,11 @@ const ANNIVERSARY_YEARS = [1, 3, 5, 10];
 const SMARTHR_SUBDOMAIN = '7e540dfa42a4f78136f1bcaf';
 
 // SmartHRでSlack IDを保存しているカスタムフィールド名
-const SMARTHR_SLACK_ID_FIELD_NAME = 'slack_id';
+const SMARTHR_SLACK_ID_FIELD_NAME = 'SlackID';
+
+// SmartHRのSlack IDカスタムフィールドテンプレートID
+// （従業員詳細APIから取得した値を設定。カスタムフィールドテンプレートAPIの権限不要）
+const SMARTHR_SLACK_ID_TEMPLATE_ID = '9f43692e-1b7f-4c53-b736-69da5743bb92';
 
 /**
  * Slack Bot Tokenを取得

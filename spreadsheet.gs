@@ -537,11 +537,10 @@ function updateAllSlackIds(activeOnly = true, syncToSmartHr = true) {
   }
 
   // SmartHRに同期
-  // TODO: SmartHR APIトークンの権限追加後にコメントアウトを解除
-  // if (syncToSmartHr && updatedEmployees.length > 0) {
-  //   console.log('\n=== SmartHRへの同期を開始 ===');
-  //   syncUpdatedSlackIdsToSmartHr(updatedEmployees);
-  // }
+  if (syncToSmartHr && updatedEmployees.length > 0) {
+    console.log('\n=== SmartHRへの同期を開始 ===');
+    syncUpdatedSlackIdsToSmartHr(updatedEmployees);
+  }
 }
 
 /**
