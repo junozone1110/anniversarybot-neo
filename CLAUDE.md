@@ -6,6 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 従業員の誕生日・入社周年を祝うSlack Bot（Google Apps Script）。SmartHR APIから従業員情報を同期し、Slackで通知・ギフト選択フローを提供。
 
+## clasp セットアップ
+
+初回クローン時は `.clasp.json` を作成する必要がある:
+
+```bash
+# テンプレートをコピー
+cp .clasp.json.example .clasp.json
+
+# スクリプトIDを設定（GASエディタのURLから取得）
+# https://script.google.com/home/projects/[SCRIPT_ID]/edit
+# .clasp.json の "scriptId" を実際の値に置き換える
+```
+
 ## clasp コマンド
 
 ```bash
@@ -20,6 +33,8 @@ clasp open
 ```
 
 GASエディタでテスト関数を実行する場合は `clasp open` でエディタを開き、関数選択ドロップダウンから実行。
+
+**注意:** `.clasp.json` はスクリプトIDを含むため `.gitignore` で除外されている。
 
 ## アーキテクチャ
 
@@ -114,8 +129,11 @@ Slack ID書き戻しには `config.gs` の以下を設定:
 SmartHR APIのPATCHリクエストで400エラーが発生していた問題を修正
 ```
 
+**重要: GitHubへのプッシュはユーザーから明示的に指示があるまで実行しないこと。**
+
 **プッシュ前のチェックリスト:**
-1. `commit_log/` 内の最新ログファイルを確認し、前回からの差分を把握したか
-2. 新規ログファイル `commitlog-YYYYMMDDHHMM.md` を作成したか
-3. ログファイルをコミットに含めたか
-4. `clasp push` でGASにも反映したか（コード変更時）
+1. ユーザーからプッシュの指示があったか
+2. `commit_log/` 内の最新ログファイルを確認し、前回からの差分を把握したか
+3. 新規ログファイル `commitlog-YYYYMMDDHHMM.md` を作成したか
+4. ログファイルをコミットに含めたか
+5. `clasp push` でGASにも反映したか（コード変更時）

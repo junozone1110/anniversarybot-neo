@@ -7,3 +7,6 @@ slack-anniversary-bot-implementation-plan.md
 # IDE
 .idea/
 .vscode/
+
+# clasp (contains script ID)
+.clasp.json
